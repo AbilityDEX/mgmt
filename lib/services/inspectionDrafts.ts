@@ -1,5 +1,23 @@
 import { supabaseAdmin } from '@/lib/admin'
 
+type DraftMachineRow = {
+  name?: string
+}
+
+type DraftInspectionJoinRow = {
+  id?: string
+  machine_id?: string
+  template_name?: string
+  started_at?: string
+  machines?: DraftMachineRow | DraftMachineRow[] | null
+}
+
+type DraftListRow = {
+  last_saved_at?: string
+  progress_percent?: number
+  inspections?: DraftInspectionJoinRow | DraftInspectionJoinRow[] | null
+}
+
 /**
  * Autosave inspection progress after answer/note/photo/signature
  */
@@ -241,10 +259,10 @@ export async function listDraftInspections(userId: string): Promise<
     }
 
     const result = (draftsData ?? []).map((draft) => {
-      const draftAsAny = draft as any
-      const inspection = Array.isArray(draftAsAny.inspections)
-        ? draftAsAny.inspections[0]
-        : draftAsAny.inspections
+      const draftRow = draft as DraftListRow
+      const inspection = Array.isArray(draftRow.inspections)
+        ? draftRow.inspections[0]
+        : draftRow.inspections
       const machines = Array.isArray(inspection?.machines)
         ? inspection.machines
         : [inspection?.machines]
@@ -256,8 +274,8 @@ export async function listDraftInspections(userId: string): Promise<
         machineName: (machine?.name as string) || 'Unknown Machine',
         templateName: (inspection?.template_name as string) || 'Unknown Template',
         started: (inspection?.started_at as string) || '',
-        lastEdited: (draft.last_saved_at as string) || '',
-        progressPercent: (draft.progress_percent as number) || 0,
+        lastEdited: (draftRow.last_saved_at as string) || '',
+        progressPercent: (draftRow.progress_percent as number) || 0,
         remainingQuestions: 0, // Will be calculated in UI if needed
         totalQuestions: 0,
       }

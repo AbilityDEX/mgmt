@@ -26,6 +26,12 @@ export type ArchiveDeliveryLogStatus = 'success' | 'failed' | 'retrying' | 'skip
 export type CompanySettings = {
   id: string
   companyName: string
+  archiveEmail?: string | null
+  supportEmail?: string | null
+  timezone?: string | null
+  dateFormat?: string | null
+  timeFormat?: string | null
+  defaultReplyTo?: string | null
   logoUrl: string | null
   address: string | null
   telephone: string | null

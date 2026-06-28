@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import MachineCard from '@/components/MachineCard'
 import { supabaseClient } from '@/lib/supabase'
@@ -18,6 +18,8 @@ type EditState = {
   reminderDaysBeforeDue?: number
   gracePeriod?: number
   autoGenerateInspection?: boolean
+  customIntervalValue?: number
+  customIntervalUnit?: string | null
 }
 
 const emptyNew = {
@@ -31,6 +33,189 @@ const emptyNew = {
   reminderDaysBeforeDue: 7,
   gracePeriod: 3,
   autoGenerateInspection: true,
+  customIntervalValue: 1,
+  customIntervalUnit: 'Days',
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
+}
+
+function formatSchedulePreview(
+  frequency: string | undefined,
+  customIntervalValue?: number,
+  customIntervalUnit?: string | null
+) {
+  switch (frequency) {
+    case 'Daily':
+      return 'Next inspection will become due every day.'
+    case 'Weekly':
+      return 'Next inspection will become due every week.'
+    case 'Fortnightly':
+      return 'Next inspection will become due every fortnight.'
+    case 'Monthly':
+      return 'Next inspection will become due every month.'
+    case 'Quarterly':
+      return 'Next inspection will become due every quarter.'
+    case 'Six Monthly':
+      return 'Next inspection will become due every six months.'
+    case 'Annually':
+      return 'Next inspection will become due every year.'
+    case 'Custom': {
+      const intervalValue = customIntervalValue ?? 1
+      const intervalUnit = customIntervalUnit ?? 'Days'
+      const unitLabel = intervalValue === 1 ? intervalUnit.replace(/s$/, '').toLowerCase() : intervalUnit.toLowerCase()
+      return `Next inspection every ${intervalValue} ${unitLabel}.`
+    }
+    default:
+      return 'Next inspection timing updates as soon as you save this machine.'
+  }
+}
+
+type ModalFrameProps = {
+  open: boolean
+  title: string
+  onClose: () => void
+  children: ReactNode
+  footer: ReactNode
+  titleId: string
+}
+
+function ModalFrame({ open, title, onClose, children, footer, titleId }: ModalFrameProps) {
+  const panelRef = useRef<HTMLDivElement | null>(null)
+  const [isRendered, setIsRendered] = useState(open)
+  const [isEntering, setIsEntering] = useState(open)
+  const [isClosing, setIsClosing] = useState(false)
+
+  useEffect(() => {
+    if (open) {
+      setIsRendered(true)
+      setIsEntering(true)
+      setIsClosing(false)
+
+      const animationFrame = window.requestAnimationFrame(() => {
+        setIsEntering(false)
+      })
+
+      return () => {
+        window.cancelAnimationFrame(animationFrame)
+      }
+    }
+
+    if (isRendered) {
+      setIsClosing(true)
+      const timeout = window.setTimeout(() => {
+        setIsRendered(false)
+      }, 180)
+
+      return () => {
+        window.clearTimeout(timeout)
+      }
+    }
+
+    return undefined
+  }, [isRendered, open])
+
+  useEffect(() => {
+    if (!isRendered) return
+
+    const previousBodyOverflow = document.body.style.overflow
+    const previousHtmlOverflow = document.documentElement.style.overflow
+    const previousHtmlOverscroll = document.documentElement.style.overscrollBehavior
+    document.body.style.overflow = 'hidden'
+    document.documentElement.style.overflow = 'hidden'
+    document.documentElement.style.overscrollBehavior = 'none'
+
+    const focusFirstControl = () => {
+      const focusableElements = panelRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )
+      focusableElements?.[0]?.focus() ?? panelRef.current?.focus()
+    }
+
+    const animationFrame = window.requestAnimationFrame(focusFirstControl)
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onClose()
+        return
+      }
+
+      if (event.key !== 'Tab' || !panelRef.current) return
+
+      const focusableElements = Array.from(
+        panelRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((element) => !element.hasAttribute('disabled') && element.tabIndex !== -1)
+
+      if (focusableElements.length === 0) {
+        event.preventDefault()
+        panelRef.current.focus()
+        return
+      }
+
+      const firstElement = focusableElements[0]
+      const lastElement = focusableElements[focusableElements.length - 1]
+      const activeElement = document.activeElement as HTMLElement | null
+
+      if (event.shiftKey && activeElement === firstElement) {
+        event.preventDefault()
+        lastElement.focus()
+      } else if (!event.shiftKey && activeElement === lastElement) {
+        event.preventDefault()
+        firstElement.focus()
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame)
+      document.removeEventListener('keydown', handleKeyDown)
+      document.body.style.overflow = previousBodyOverflow
+      document.documentElement.style.overflow = previousHtmlOverflow
+      document.documentElement.style.overscrollBehavior = previousHtmlOverscroll
+    }
+  }, [isRendered, onClose])
+
+  if (!isRendered) return null
+
+  return (
+    <div
+      className={`fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm transition-opacity duration-200 ${
+        isEntering || isClosing ? 'opacity-0' : 'opacity-100'
+      }`}
+      onClick={onClose}
+      role="presentation"
+    >
+      <div className="flex min-h-[100dvh] items-start justify-center px-0 py-0 sm:px-4 sm:py-4">
+        <div
+          ref={panelRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          tabIndex={-1}
+          className={`flex w-full max-w-2xl flex-col bg-slate-900 shadow-[0_30px_80px_rgba(0,0,0,0.45)] max-h-[100dvh] overflow-x-hidden overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] transition-all duration-200 sm:max-h-[calc(100dvh-2rem)] sm:rounded-[28px] ${
+            isEntering || isClosing ? 'translate-y-2 scale-[0.985] opacity-0' : 'translate-y-0 scale-100 opacity-100'
+          }`}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="sticky top-0 z-20 border-b border-slate-800/80 bg-slate-900/95 px-4 py-4 backdrop-blur sm:px-6">
+            <p className="text-xs uppercase tracking-[0.35em] text-emerald-400">Machine Management</p>
+            <h2 id={titleId} className="mt-2 text-xl font-semibold text-white sm:text-2xl">
+              {title}
+            </h2>
+          </div>
+          {children}
+          <div className="sticky bottom-0 z-20 border-t border-slate-800/80 bg-slate-900/95 px-4 py-4 backdrop-blur sm:px-6">
+            {footer}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 type Template = {
@@ -55,10 +240,15 @@ export default function AdminMachinesPage() {
   const [assetSearch, setAssetSearch] = useState('')
 
   const [isAddOpen, setIsAddOpen] = useState(false)
+  const [isEditOpen, setIsEditOpen] = useState(false)
   const [newMachine, setNewMachine] = useState(emptyNew)
   const [saving, setSaving] = useState(false)
 
   const [editState, setEditState] = useState<EditState | null>(null)
+  const [isSchedulingExpanded, setIsSchedulingExpanded] = useState(true)
+
+  const addModalTitleId = 'add-machine-modal-title'
+  const editModalTitleId = 'edit-machine-modal-title'
 
   const showSuccess = (msg: string) => {
     setSuccess(msg)
@@ -70,6 +260,68 @@ export default function AdminMachinesPage() {
     if (assetSearch.trim() && !(machine.assetId ?? '').toLowerCase().includes(assetSearch.trim().toLowerCase())) return false
     return true
   })
+
+  const addSchedulePreview = useMemo(
+    () =>
+      formatSchedulePreview(
+        newMachine.inspectionFrequency,
+        newMachine.customIntervalValue,
+        newMachine.customIntervalUnit
+      ),
+    [newMachine.customIntervalUnit, newMachine.customIntervalValue, newMachine.inspectionFrequency]
+  )
+
+  const editSchedulePreview = useMemo(
+    () =>
+      formatSchedulePreview(
+        editState?.inspectionFrequency,
+        editState?.customIntervalValue,
+        editState?.customIntervalUnit
+      ),
+    [editState?.customIntervalUnit, editState?.customIntervalValue, editState?.inspectionFrequency]
+  )
+
+  const openAddModal = useCallback(() => {
+    setIsSchedulingExpanded(true)
+    setIsAddOpen(true)
+  }, [])
+
+  const openEditModal = useCallback((machine: Machine) => {
+    const existingDraft = editState && editState.id === machine.id ? editState : null
+
+    setEditState(
+      existingDraft ?? {
+        id: machine.id,
+        name: machine.name,
+        area: machine.area,
+        assignedUser: machine.assignedUser,
+        inspectionDeadline: machine.inspectionDeadline,
+        assetId: machine.assetId ?? '',
+        templateId: machine.templateId ?? '',
+        inspectionFrequency: machine.inspectionFrequency ?? 'Monthly',
+        reminderDaysBeforeDue: machine.reminderDaysBeforeDue ?? 7,
+        gracePeriod: machine.gracePeriod ?? 3,
+        autoGenerateInspection: machine.autoGenerateInspection ?? true,
+        customIntervalValue: machine.customIntervalValue ?? 1,
+        customIntervalUnit: machine.customIntervalUnit ?? 'Days',
+      }
+    )
+    setIsSchedulingExpanded(true)
+    setIsEditOpen(true)
+  }, [editState])
+
+  const closeAddModal = useCallback(() => {
+    setIsAddOpen(false)
+  }, [])
+
+  const cancelEditModal = useCallback(() => {
+    setIsEditOpen(false)
+    setEditState(null)
+  }, [])
+
+  const closeEditModal = useCallback(() => {
+    setIsEditOpen(false)
+  }, [])
 
   const load = useCallback(async () => {
     setIsLoading(true)
@@ -142,6 +394,9 @@ export default function AdminMachinesPage() {
           reminder_days_before_due: newMachine.reminderDaysBeforeDue ?? 7,
           grace_period: newMachine.gracePeriod ?? 3,
           auto_generate_inspection: newMachine.autoGenerateInspection ?? true,
+          custom_interval_value:
+            newMachine.inspectionFrequency === 'Custom' ? clampNumber(newMachine.customIntervalValue ?? 1, 1, Number.MAX_SAFE_INTEGER) : null,
+          custom_interval_unit: newMachine.inspectionFrequency === 'Custom' ? newMachine.customIntervalUnit ?? 'Days' : null,
         }),
       })
       const data = await res.json()
@@ -187,6 +442,9 @@ export default function AdminMachinesPage() {
           reminder_days_before_due: editState.reminderDaysBeforeDue ?? 7,
           grace_period: editState.gracePeriod ?? 3,
           auto_generate_inspection: editState.autoGenerateInspection ?? true,
+          custom_interval_value:
+            editState.inspectionFrequency === 'Custom' ? clampNumber(editState.customIntervalValue ?? 1, 1, Number.MAX_SAFE_INTEGER) : null,
+          custom_interval_unit: editState.inspectionFrequency === 'Custom' ? editState.customIntervalUnit ?? 'Days' : null,
         }),
       })
       const data = await res.json()
@@ -195,6 +453,7 @@ export default function AdminMachinesPage() {
         return
       }
       setMachines((prev) => prev.map((m) => (m.id === editState.id ? data.machine : m)))
+      setIsEditOpen(false)
       setEditState(null)
       showSuccess('Machine updated.')
     } catch {
@@ -229,7 +488,8 @@ export default function AdminMachinesPage() {
     }
   }
 
-  const inputClass = 'mt-2 w-full rounded-3xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-100 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/20'
+  const inputClass =
+    'mt-2 w-full rounded-3xl border border-slate-800 bg-slate-950 px-4 py-3.5 text-[15px] text-slate-100 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/20'
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
@@ -245,7 +505,7 @@ export default function AdminMachinesPage() {
           <button
             type="button"
             onClick={() => {
-              setIsAddOpen(true)
+              openAddModal()
               setError(null)
             }}
             className="rounded-3xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-[0_10px_25px_rgba(16,185,129,0.25)] transition hover:bg-emerald-500"
@@ -298,19 +558,7 @@ export default function AdminMachinesPage() {
                   primaryAction={{
                     label: 'Edit',
                     variant: 'secondary',
-                    onClick: () =>
-                      setEditState({
-                        id: machine.id,
-                        name: machine.name,
-                        area: machine.area,
-                        assignedUser: machine.assignedUser,
-                        inspectionDeadline: machine.inspectionDeadline,
-                        assetId: machine.assetId ?? '',
-                        templateId: machine.templateId ?? '',
-                        reminderDaysBeforeDue: machine.reminderDaysBeforeDue ?? 7,
-                        gracePeriod: machine.gracePeriod ?? 3,
-                        autoGenerateInspection: machine.autoGenerateInspection ?? true,
-                      }),
+                    onClick: () => openEditModal(machine),
                   }}
                   secondaryAction={{
                     label: 'Delete',
@@ -330,148 +578,461 @@ export default function AdminMachinesPage() {
         </div>
       </div>
 
-      {isAddOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 px-4">
-          <div className="w-full max-w-lg rounded-[28px] bg-slate-900 p-6 shadow-[0_25px_60px_rgba(0,0,0,0.35)]">
-            <h2 className="text-xl font-semibold text-white">Add Machine</h2>
-            <div className="mt-5 space-y-4">
-              <label className="block">
-                <span className="text-sm text-slate-300">Machine Name</span>
-                <input type="text" value={newMachine.name} onChange={(e) => setNewMachine((p) => ({ ...p, name: e.target.value }))} placeholder="Enter machine name" className={inputClass} />
-              </label>
-              <label className="block">
-                <span className="text-sm text-slate-300">Work Area</span>
-                <input type="text" value={newMachine.area} onChange={(e) => setNewMachine((p) => ({ ...p, area: e.target.value }))} placeholder="Enter work area" className={inputClass} />
-              </label>
-              <label className="block">
-                <span className="text-sm text-slate-300">Assigned User (username)</span>
-                <input type="text" value={newMachine.assignedUser} onChange={(e) => setNewMachine((p) => ({ ...p, assignedUser: e.target.value }))} placeholder="Enter username" className={inputClass} />
-              </label>
-              <label className="block">
-                <span className="text-sm text-slate-300">Inspection Time</span>
-                <input type="time" value={newMachine.inspectionTime} onChange={(e) => setNewMachine((p) => ({ ...p, inspectionTime: e.target.value }))} className={inputClass} />
-              </label>
-              <label className="block">
-                <span className="text-sm text-slate-300">Asset ID (optional)</span>
-                <input type="text" value={newMachine.assetId} onChange={(e) => setNewMachine((p) => ({ ...p, assetId: e.target.value }))} className={inputClass} />
-              </label>
-              <label className="block">
-                <span className="text-sm text-slate-300">Inspection Template (optional)</span>
-                <select value={newMachine.templateId} onChange={(e) => setNewMachine((p) => ({ ...p, templateId: e.target.value }))} className={inputClass}>
-                  <option value="">Select a template...</option>
-                  {templates.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block">
-                <span className="text-sm text-slate-300">Inspection Frequency</span>
-                <select value={newMachine.inspectionFrequency} onChange={(e) => setNewMachine((p) => ({ ...p, inspectionFrequency: e.target.value }))} className={inputClass}>
-                  <option value="Daily">Daily</option>
-                  <option value="Weekly">Weekly</option>
-                  <option value="Fortnightly">Fortnightly</option>
-                  <option value="Monthly">Monthly</option>
-                  <option value="Quarterly">Quarterly</option>
-                  <option value="Six Monthly">Six Monthly</option>
-                  <option value="Annually">Annually</option>
-                  <option value="Custom">Custom</option>
-                </select>
-              </label>
-              <label className="block">
-                <span className="text-sm text-slate-300">Reminder Days Before Due</span>
-                <input type="number" min="0" value={newMachine.reminderDaysBeforeDue ?? 7} onChange={(e) => setNewMachine((p) => ({ ...p, reminderDaysBeforeDue: parseInt(e.target.value) || 0 }))} className={inputClass} />
-              </label>
-              <label className="block">
-                <span className="text-sm text-slate-300">Grace Period (days)</span>
-                <input type="number" min="0" value={newMachine.gracePeriod ?? 3} onChange={(e) => setNewMachine((p) => ({ ...p, gracePeriod: parseInt(e.target.value) || 0 }))} className={inputClass} />
-              </label>
-              <label className="flex items-center gap-3">
-                <input type="checkbox" checked={newMachine.autoGenerateInspection ?? true} onChange={(e) => setNewMachine((p) => ({ ...p, autoGenerateInspection: e.target.checked }))} className="rounded border border-slate-700" />
-                <span className="text-sm text-slate-300">Auto Generate Next Inspection</span>
-              </label>
-            </div>
-            <div className="mt-6 flex flex-wrap justify-end gap-3">
-              <button type="button" onClick={() => setIsAddOpen(false)} className="rounded-3xl border border-slate-700 px-5 py-3 text-sm font-semibold text-slate-200 transition hover:bg-slate-800">Cancel</button>
-              <button type="button" onClick={() => { void handleAdd() }} disabled={saving} className="rounded-3xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white shadow-[0_10px_25px_rgba(16,185,129,0.25)] transition hover:bg-emerald-500 disabled:opacity-60">
-                {saving ? 'Saving...' : 'Save'}
+      <ModalFrame
+        open={isAddOpen}
+        title="Add Machine"
+        titleId={addModalTitleId}
+        onClose={closeAddModal}
+        footer={
+          <div className="flex flex-wrap justify-end gap-3">
+            <button
+              type="button"
+              onClick={closeAddModal}
+              className="rounded-3xl border border-slate-700 px-5 py-3 text-sm font-semibold text-slate-200 transition hover:bg-slate-800"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void handleAdd()
+              }}
+              disabled={saving}
+              className="rounded-3xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white shadow-[0_10px_25px_rgba(16,185,129,0.25)] transition hover:bg-emerald-500 disabled:opacity-60"
+            >
+              {saving ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+        }
+      >
+        <div className="flex-1 px-4 py-5 sm:px-6">
+          <div className="space-y-5">
+            <label className="block">
+              <span className="text-sm font-medium text-slate-200">Machine Name</span>
+              <input
+                type="text"
+                value={newMachine.name}
+                onChange={(event) => setNewMachine((previous) => ({ ...previous, name: event.target.value }))}
+                placeholder="Enter machine name"
+                className={inputClass}
+              />
+            </label>
+            <label className="block">
+              <span className="text-sm font-medium text-slate-200">Work Area</span>
+              <input
+                type="text"
+                value={newMachine.area}
+                onChange={(event) => setNewMachine((previous) => ({ ...previous, area: event.target.value }))}
+                placeholder="Enter work area"
+                className={inputClass}
+              />
+            </label>
+            <label className="block">
+              <span className="text-sm font-medium text-slate-200">Assigned User (username)</span>
+              <input
+                type="text"
+                value={newMachine.assignedUser}
+                onChange={(event) => setNewMachine((previous) => ({ ...previous, assignedUser: event.target.value }))}
+                placeholder="Enter username"
+                className={inputClass}
+              />
+            </label>
+            <label className="block">
+              <span className="text-sm font-medium text-slate-200">Inspection Time</span>
+              <input
+                type="time"
+                value={newMachine.inspectionTime}
+                onChange={(event) => setNewMachine((previous) => ({ ...previous, inspectionTime: event.target.value }))}
+                className={inputClass}
+              />
+            </label>
+            <label className="block">
+              <span className="text-sm font-medium text-slate-200">Asset ID (optional)</span>
+              <input
+                type="text"
+                value={newMachine.assetId}
+                onChange={(event) => setNewMachine((previous) => ({ ...previous, assetId: event.target.value }))}
+                className={inputClass}
+              />
+            </label>
+            <label className="block">
+              <span className="text-sm font-medium text-slate-200">Inspection Template (optional)</span>
+              <select
+                value={newMachine.templateId}
+                onChange={(event) => setNewMachine((previous) => ({ ...previous, templateId: event.target.value }))}
+                className={inputClass}
+              >
+                <option value="">Select a template...</option>
+                {templates.map((template) => (
+                  <option key={template.id} value={template.id}>
+                    {template.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <section className="rounded-[24px] border border-slate-800 bg-slate-950/60 p-4 sm:p-5">
+              <button
+                type="button"
+                onClick={() => setIsSchedulingExpanded((previous) => !previous)}
+                className="flex w-full items-center justify-between gap-4 text-left"
+                aria-expanded={isSchedulingExpanded}
+              >
+                <div>
+                  <p className="text-sm font-semibold text-white">Scheduling</p>
+                  <p className="mt-1 text-sm text-slate-400">Controls when this machine becomes due.</p>
+                </div>
+                <span className="text-sm font-semibold text-emerald-400">{isSchedulingExpanded ? '▲' : '▼'}</span>
               </button>
-            </div>
+
+              {isSchedulingExpanded ? (
+                <div className="mt-5 space-y-5">
+                  <label className="block">
+                    <span className="text-sm font-medium text-slate-200">Inspection Frequency</span>
+                    <select
+                      value={newMachine.inspectionFrequency}
+                      onChange={(event) =>
+                        setNewMachine((previous) => ({
+                          ...previous,
+                          inspectionFrequency: event.target.value,
+                        }))
+                      }
+                      className={inputClass}
+                    >
+                      <option value="Daily">Daily</option>
+                      <option value="Weekly">Weekly</option>
+                      <option value="Fortnightly">Fortnightly</option>
+                      <option value="Monthly">Monthly</option>
+                      <option value="Quarterly">Quarterly</option>
+                      <option value="Six Monthly">Six Monthly</option>
+                      <option value="Annually">Annually</option>
+                      <option value="Custom">Custom</option>
+                    </select>
+                    <p className="mt-2 text-sm text-slate-400">Controls how often inspections become due for this machine.</p>
+                  </label>
+
+                  <div className="grid gap-5 md:grid-cols-2">
+                    <label className="block">
+                      <span className="text-sm font-medium text-slate-200">Reminder Days Before Due</span>
+                      <input
+                        type="number"
+                        min="0"
+                        max="365"
+                        inputMode="numeric"
+                        value={newMachine.reminderDaysBeforeDue ?? 7}
+                        onChange={(event) => {
+                          const nextValue = event.target.value === '' ? 0 : clampNumber(Number.parseInt(event.target.value, 10) || 0, 0, 365)
+                          setNewMachine((previous) => ({ ...previous, reminderDaysBeforeDue: nextValue }))
+                        }}
+                        className={inputClass}
+                      />
+                      <p className="mt-2 text-sm text-slate-400">Users receive reminders this many days before the inspection becomes due.</p>
+                    </label>
+
+                    <label className="block">
+                      <span className="text-sm font-medium text-slate-200">Grace Period (days)</span>
+                      <input
+                        type="number"
+                        min="0"
+                        max="365"
+                        inputMode="numeric"
+                        value={newMachine.gracePeriod ?? 3}
+                        onChange={(event) => {
+                          const nextValue = event.target.value === '' ? 0 : clampNumber(Number.parseInt(event.target.value, 10) || 0, 0, 365)
+                          setNewMachine((previous) => ({ ...previous, gracePeriod: nextValue }))
+                        }}
+                        className={inputClass}
+                      />
+                      <p className="mt-2 text-sm text-slate-400">Machine is considered overdue after this many days.</p>
+                    </label>
+                  </div>
+
+                  <label className="flex items-start gap-3 rounded-[20px] border border-slate-800 bg-slate-950/80 px-4 py-4">
+                    <input
+                      type="checkbox"
+                      checked={newMachine.autoGenerateInspection ?? true}
+                      onChange={(event) =>
+                        setNewMachine((previous) => ({ ...previous, autoGenerateInspection: event.target.checked }))
+                      }
+                      className="mt-1 rounded border border-slate-700"
+                    />
+                    <span>
+                      <span className="block text-sm font-medium text-slate-200">Auto Generate Next Inspection</span>
+                      <span className="mt-1 block text-sm text-slate-400">Create the next inspection automatically when the current one is completed.</span>
+                    </span>
+                  </label>
+
+                  {newMachine.inspectionFrequency === 'Custom' ? (
+                    <div className="grid gap-5 md:grid-cols-2">
+                      <label className="block">
+                        <span className="text-sm font-medium text-slate-200">Custom Interval Value</span>
+                        <input
+                          type="number"
+                          min="1"
+                          inputMode="numeric"
+                          value={newMachine.customIntervalValue ?? 1}
+                          onChange={(event) => {
+                            const nextValue = event.target.value === '' ? 1 : Math.max(1, Number.parseInt(event.target.value, 10) || 1)
+                            setNewMachine((previous) => ({ ...previous, customIntervalValue: nextValue }))
+                          }}
+                          className={inputClass}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-sm font-medium text-slate-200">Custom Interval Unit</span>
+                        <select
+                          value={newMachine.customIntervalUnit ?? 'Days'}
+                          onChange={(event) => setNewMachine((previous) => ({ ...previous, customIntervalUnit: event.target.value }))}
+                          className={inputClass}
+                        >
+                          <option value="Days">Days</option>
+                          <option value="Weeks">Weeks</option>
+                          <option value="Months">Months</option>
+                        </select>
+                      </label>
+                    </div>
+                  ) : null}
+
+                  <div className="rounded-[20px] border border-emerald-500/20 bg-emerald-500/10 px-4 py-4 text-sm text-emerald-100">
+                    {addSchedulePreview}
+                  </div>
+                </div>
+              ) : null}
+            </section>
           </div>
         </div>
-      ) : null}
+      </ModalFrame>
 
-      {editState ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 px-4">
-          <div className="w-full max-w-lg rounded-[28px] bg-slate-900 p-6 shadow-[0_25px_60px_rgba(0,0,0,0.35)]">
-            <h2 className="text-xl font-semibold text-white">Edit Machine</h2>
-            <div className="mt-5 space-y-4">
-              <label className="block">
-                <span className="text-sm text-slate-300">Machine Name</span>
-                <input type="text" value={editState.name} onChange={(e) => setEditState((p) => (p ? { ...p, name: e.target.value } : p))} className={inputClass} />
-              </label>
-              <label className="block">
-                <span className="text-sm text-slate-300">Work Area</span>
-                <input type="text" value={editState.area} onChange={(e) => setEditState((p) => (p ? { ...p, area: e.target.value } : p))} className={inputClass} />
-              </label>
-              <label className="block">
-                <span className="text-sm text-slate-300">Assigned User (username)</span>
-                <input type="text" value={editState.assignedUser} onChange={(e) => setEditState((p) => (p ? { ...p, assignedUser: e.target.value } : p))} className={inputClass} />
-              </label>
-              <label className="block">
-                <span className="text-sm text-slate-300">Inspection Time</span>
-                <input type="time" value={editState.inspectionDeadline} onChange={(e) => setEditState((p) => (p ? { ...p, inspectionDeadline: e.target.value } : p))} className={inputClass} />
-              </label>
-              <label className="block">
-                <span className="text-sm text-slate-300">Asset ID (optional)</span>
-                <input type="text" value={editState.assetId} onChange={(e) => setEditState((p) => (p ? { ...p, assetId: e.target.value } : p))} className={inputClass} />
-              </label>
-              <label className="block">
-                <span className="text-sm text-slate-300">Inspection Template (optional)</span>
-                <select value={editState.templateId ?? ''} onChange={(e) => setEditState((p) => (p ? { ...p, templateId: e.target.value } : p))} className={inputClass}>
-                  <option value="">Select a template...</option>
-                  {templates.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block">
-                <span className="text-sm text-slate-300">Inspection Frequency</span>
-                <select value={editState.inspectionFrequency ?? 'Monthly'} onChange={(e) => setEditState((p) => (p ? { ...p, inspectionFrequency: e.target.value } : p))} className={inputClass}>
-                  <option value="Daily">Daily</option>
-                  <option value="Weekly">Weekly</option>
-                  <option value="Fortnightly">Fortnightly</option>
-                  <option value="Monthly">Monthly</option>
-                  <option value="Quarterly">Quarterly</option>
-                  <option value="Six Monthly">Six Monthly</option>
-                  <option value="Annually">Annually</option>
-                  <option value="Custom">Custom</option>
-                </select>
-              </label>
-              <label className="block">
-                <span className="text-sm text-slate-300">Reminder Days Before Due</span>
-                <input type="number" min="0" value={editState.reminderDaysBeforeDue ?? 7} onChange={(e) => setEditState((p) => (p ? { ...p, reminderDaysBeforeDue: parseInt(e.target.value) || 0 } : p))} className={inputClass} />
-              </label>
-              <label className="block">
-                <span className="text-sm text-slate-300">Grace Period (days)</span>
-                <input type="number" min="0" value={editState.gracePeriod ?? 3} onChange={(e) => setEditState((p) => (p ? { ...p, gracePeriod: parseInt(e.target.value) || 0 } : p))} className={inputClass} />
-              </label>
-              <label className="flex items-center gap-3">
-                <input type="checkbox" checked={editState.autoGenerateInspection ?? true} onChange={(e) => setEditState((p) => (p ? { ...p, autoGenerateInspection: e.target.checked } : p))} className="rounded border border-slate-700" />
-                <span className="text-sm text-slate-300">Auto Generate Next Inspection</span>
-              </label>
-            </div>
-            <div className="mt-6 flex flex-wrap justify-end gap-3">
-              <button type="button" onClick={() => setEditState(null)} className="rounded-3xl border border-slate-700 px-5 py-3 text-sm font-semibold text-slate-200 transition hover:bg-slate-800">Cancel</button>
-              <button type="button" onClick={() => { void handleEdit() }} disabled={saving} className="rounded-3xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white shadow-[0_10px_25px_rgba(16,185,129,0.25)] transition hover:bg-emerald-500 disabled:opacity-60">
+      {isEditOpen && editState ? (
+        <ModalFrame
+          open={isEditOpen}
+          title="Edit Machine"
+          titleId={editModalTitleId}
+          onClose={closeEditModal}
+          footer={
+            <div className="flex flex-wrap justify-end gap-3">
+              <button
+                type="button"
+                onClick={cancelEditModal}
+                className="rounded-3xl border border-slate-700 px-5 py-3 text-sm font-semibold text-slate-200 transition hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleEdit()
+                }}
+                disabled={saving}
+                className="rounded-3xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white shadow-[0_10px_25px_rgba(16,185,129,0.25)] transition hover:bg-emerald-500 disabled:opacity-60"
+              >
                 {saving ? 'Saving...' : 'Save Changes'}
               </button>
             </div>
+          }
+        >
+          <div className="flex-1 px-4 py-5 sm:px-6">
+            <div className="space-y-5">
+              <label className="block">
+                <span className="text-sm font-medium text-slate-200">Machine Name</span>
+                <input
+                  type="text"
+                  value={editState.name}
+                  onChange={(event) => setEditState((previous) => (previous ? { ...previous, name: event.target.value } : previous))}
+                  className={inputClass}
+                />
+              </label>
+              <label className="block">
+                <span className="text-sm font-medium text-slate-200">Work Area</span>
+                <input
+                  type="text"
+                  value={editState.area}
+                  onChange={(event) => setEditState((previous) => (previous ? { ...previous, area: event.target.value } : previous))}
+                  className={inputClass}
+                />
+              </label>
+              <label className="block">
+                <span className="text-sm font-medium text-slate-200">Assigned User (username)</span>
+                <input
+                  type="text"
+                  value={editState.assignedUser}
+                  onChange={(event) => setEditState((previous) => (previous ? { ...previous, assignedUser: event.target.value } : previous))}
+                  className={inputClass}
+                />
+              </label>
+              <label className="block">
+                <span className="text-sm font-medium text-slate-200">Inspection Time</span>
+                <input
+                  type="time"
+                  value={editState.inspectionDeadline}
+                  onChange={(event) => setEditState((previous) => (previous ? { ...previous, inspectionDeadline: event.target.value } : previous))}
+                  className={inputClass}
+                />
+              </label>
+              <label className="block">
+                <span className="text-sm font-medium text-slate-200">Asset ID (optional)</span>
+                <input
+                  type="text"
+                  value={editState.assetId}
+                  onChange={(event) => setEditState((previous) => (previous ? { ...previous, assetId: event.target.value } : previous))}
+                  className={inputClass}
+                />
+              </label>
+              <label className="block">
+                <span className="text-sm font-medium text-slate-200">Inspection Template (optional)</span>
+                <select
+                  value={editState.templateId ?? ''}
+                  onChange={(event) => setEditState((previous) => (previous ? { ...previous, templateId: event.target.value } : previous))}
+                  className={inputClass}
+                >
+                  <option value="">Select a template...</option>
+                  {templates.map((template) => (
+                    <option key={template.id} value={template.id}>
+                      {template.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <section className="rounded-[24px] border border-slate-800 bg-slate-950/60 p-4 sm:p-5">
+                <button
+                  type="button"
+                  onClick={() => setIsSchedulingExpanded((previous) => !previous)}
+                  className="flex w-full items-center justify-between gap-4 text-left"
+                  aria-expanded={isSchedulingExpanded}
+                >
+                  <div>
+                    <p className="text-sm font-semibold text-white">Scheduling</p>
+                    <p className="mt-1 text-sm text-slate-400">Controls when this machine becomes due.</p>
+                  </div>
+                  <span className="text-sm font-semibold text-emerald-400">{isSchedulingExpanded ? '▲' : '▼'}</span>
+                </button>
+
+                {isSchedulingExpanded ? (
+                  <div className="mt-5 space-y-5">
+                    <label className="block">
+                      <span className="text-sm font-medium text-slate-200">Inspection Frequency</span>
+                      <select
+                        value={editState.inspectionFrequency ?? 'Monthly'}
+                        onChange={(event) =>
+                          setEditState((previous) =>
+                            previous
+                              ? {
+                                  ...previous,
+                                  inspectionFrequency: event.target.value,
+                                }
+                              : previous
+                          )
+                        }
+                        className={inputClass}
+                      >
+                        <option value="Daily">Daily</option>
+                        <option value="Weekly">Weekly</option>
+                        <option value="Fortnightly">Fortnightly</option>
+                        <option value="Monthly">Monthly</option>
+                        <option value="Quarterly">Quarterly</option>
+                        <option value="Six Monthly">Six Monthly</option>
+                        <option value="Annually">Annually</option>
+                        <option value="Custom">Custom</option>
+                      </select>
+                      <p className="mt-2 text-sm text-slate-400">Controls how often inspections become due for this machine.</p>
+                    </label>
+
+                    <div className="grid gap-5 md:grid-cols-2">
+                      <label className="block">
+                        <span className="text-sm font-medium text-slate-200">Reminder Days Before Due</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="365"
+                          inputMode="numeric"
+                          value={editState.reminderDaysBeforeDue ?? 7}
+                          onChange={(event) => {
+                            const nextValue = event.target.value === '' ? 0 : clampNumber(Number.parseInt(event.target.value, 10) || 0, 0, 365)
+                            setEditState((previous) => (previous ? { ...previous, reminderDaysBeforeDue: nextValue } : previous))
+                          }}
+                          className={inputClass}
+                        />
+                        <p className="mt-2 text-sm text-slate-400">Users receive reminders this many days before the inspection becomes due.</p>
+                      </label>
+
+                      <label className="block">
+                        <span className="text-sm font-medium text-slate-200">Grace Period (days)</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="365"
+                          inputMode="numeric"
+                          value={editState.gracePeriod ?? 3}
+                          onChange={(event) => {
+                            const nextValue = event.target.value === '' ? 0 : clampNumber(Number.parseInt(event.target.value, 10) || 0, 0, 365)
+                            setEditState((previous) => (previous ? { ...previous, gracePeriod: nextValue } : previous))
+                          }}
+                          className={inputClass}
+                        />
+                        <p className="mt-2 text-sm text-slate-400">Machine is considered overdue after this many days.</p>
+                      </label>
+                    </div>
+
+                    <label className="flex items-start gap-3 rounded-[20px] border border-slate-800 bg-slate-950/80 px-4 py-4">
+                      <input
+                        type="checkbox"
+                        checked={editState.autoGenerateInspection ?? true}
+                        onChange={(event) =>
+                          setEditState((previous) =>
+                            previous ? { ...previous, autoGenerateInspection: event.target.checked } : previous
+                          )
+                        }
+                        className="mt-1 rounded border border-slate-700"
+                      />
+                      <span>
+                        <span className="block text-sm font-medium text-slate-200">Auto Generate Next Inspection</span>
+                        <span className="mt-1 block text-sm text-slate-400">Create the next inspection automatically when the current one is completed.</span>
+                      </span>
+                    </label>
+
+                    {editState.inspectionFrequency === 'Custom' ? (
+                      <div className="grid gap-5 md:grid-cols-2">
+                        <label className="block">
+                          <span className="text-sm font-medium text-slate-200">Custom Interval Value</span>
+                          <input
+                            type="number"
+                            min="1"
+                            inputMode="numeric"
+                            value={editState.customIntervalValue ?? 1}
+                            onChange={(event) => {
+                              const nextValue = event.target.value === '' ? 1 : Math.max(1, Number.parseInt(event.target.value, 10) || 1)
+                              setEditState((previous) => (previous ? { ...previous, customIntervalValue: nextValue } : previous))
+                            }}
+                            className={inputClass}
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="text-sm font-medium text-slate-200">Custom Interval Unit</span>
+                          <select
+                            value={editState.customIntervalUnit ?? 'Days'}
+                            onChange={(event) =>
+                              setEditState((previous) => (previous ? { ...previous, customIntervalUnit: event.target.value } : previous))
+                            }
+                            className={inputClass}
+                          >
+                            <option value="Days">Days</option>
+                            <option value="Weeks">Weeks</option>
+                            <option value="Months">Months</option>
+                          </select>
+                        </label>
+                      </div>
+                    ) : null}
+
+                    <div className="rounded-[20px] border border-emerald-500/20 bg-emerald-500/10 px-4 py-4 text-sm text-emerald-100">
+                      {editSchedulePreview}
+                    </div>
+                  </div>
+                ) : null}
+              </section>
+            </div>
           </div>
-        </div>
+        </ModalFrame>
       ) : null}
     </main>
   )

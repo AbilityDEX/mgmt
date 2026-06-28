@@ -234,6 +234,7 @@ export async function POST(request: Request) {
     intervalValue: 1,
     customCron: null,
     active: true,
+    nextDue: new Date(),
   })
 
   return NextResponse.json({

@@ -1,21 +1,20 @@
 import crypto from 'crypto'
-import PDFDocument from 'pdfkit'
-import nodemailer from 'nodemailer'
 
 import { serverConfigErrorMessage, supabaseAdmin } from '@/lib/admin'
 import { getCompanySettings } from '@/lib/services/companySettings'
-import {
-  listEmailRecipients,
-  recipientMatchesInspection,
-} from '@/lib/services/emailDistribution'
-import { getDefaultInspectionTemplate, renderTemplate } from '@/lib/services/emailTemplates'
+import { applySubjectPrefix, resolveArchiveMailbox, resolveCompanyName, resolveEmailEnvelope } from '@/lib/services/emailConfig'
+import { buildArchiveRetryStatusTemplate, buildInspectionArchiveEmailTemplate } from '@/lib/services/emailMessageTemplates'
+import { createArchivePDF } from '@/lib/services/pdf'
+import { getSmtpTransport } from '@/lib/services/smtpConfig'
 
 type InspectionForArchive = {
   id: string
   machineId: string
   machineName: string
+  assetId: string | null
   machineArea: string | null
   templateName: string
+  inspectionFrequency: string | null
   status: string
   startedAt: string | null
   completedAt: string | null
@@ -30,7 +29,7 @@ type InspectionItemForArchive = {
   questionType: string
   answer: string | null
   comments: string | null
-  photos: unknown[]
+  photos: Array<{ id: string; url: string; timestamp: string; caption: string | null }>
   signatureData: string | null
 }
 
@@ -41,6 +40,8 @@ type DefectForArchive = {
   status: string
   description: string | null
 }
+
+type ArchiveJobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'retrying' | 'cancelled'
 
 function formatDateTime(value: string | null) {
   if (!value) return 'N/A'
@@ -62,104 +63,46 @@ function formatDuration(startedAt: string | null, completedAt: string | null) {
   return `${hours}h ${minutes}m`
 }
 
-function buildPdfBuffer(input: {
-  company: Awaited<ReturnType<typeof getCompanySettings>>
-  inspection: InspectionForArchive
-  items: InspectionItemForArchive[]
-  defects: DefectForArchive[]
-  overallResult: 'PASS' | 'FAIL' | 'INCOMPLETE'
+function logArchiveStage(stage: string, details: Record<string, unknown>) {
+  console.info('[archive-pipeline]', { stage, ...details })
+}
+
+function logArchiveEvent(input: {
+  event: 'email_sent' | 'email_failed' | 'retry_queued' | 'retry_succeeded' | 'pdf_generated' | 'archive_created'
+  inspectionId: string
+  machineId: string
+  referenceNumber: string
+  details?: Record<string, unknown>
 }) {
-  return new Promise<Buffer>((resolve, reject) => {
-    const doc = new PDFDocument({ size: 'A4', margin: 36 })
-    const chunks: Buffer[] = []
-
-    doc.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
-    doc.on('end', () => resolve(Buffer.concat(chunks)))
-    doc.on('error', reject)
-
-    doc.fillColor('#0f172a').fontSize(24).text(input.company.companyName)
-    doc.moveDown(0.25)
-    doc.fillColor('#475569').fontSize(10)
-    doc.text(input.company.address || '')
-    doc.text(input.company.telephone || '')
-    doc.text(input.company.email || '')
-    doc.text(input.company.website || '')
-
-    doc.moveDown(1)
-    doc.fillColor('#0f172a').fontSize(16).text('Inspection Archive Report')
-    doc.moveDown(0.5)
-
-    const details: Array<[string, string]> = [
-      ['Machine', input.inspection.machineName],
-      ['Department', input.inspection.machineArea || 'N/A'],
-      ['Template', input.inspection.templateName],
-      ['Inspector', input.inspection.operatorName],
-      ['Started', formatDateTime(input.inspection.startedAt)],
-      ['Completed', formatDateTime(input.inspection.completedAt)],
-      ['Duration', formatDuration(input.inspection.startedAt, input.inspection.completedAt)],
-      ['Result', input.overallResult],
-      ['Reference', input.inspection.id],
-    ]
-
-    for (const [label, value] of details) {
-      doc.fontSize(10).fillColor('#334155').text(`${label}: `, { continued: true })
-      doc.fillColor('#0f172a').text(value)
-    }
-
-    doc.moveDown(1)
-    doc.fontSize(12).fillColor('#0f172a').text('Checklist')
-    doc.moveDown(0.3)
-
-    for (const item of input.items) {
-      doc.fontSize(10).fillColor('#0f172a').text(`${item.displayOrder}. ${item.question}`)
-      doc.fillColor('#475569').text(`Answer: ${item.answer || 'N/A'}`)
-      if (item.comments) doc.text(`Comments: ${item.comments}`)
-      if (Array.isArray(item.photos) && item.photos.length > 0) doc.text(`Photos: ${item.photos.length} attached`)
-      if (item.signatureData) doc.text('Signature: Captured')
-      doc.moveDown(0.3)
-    }
-
-    doc.moveDown(0.5)
-    doc.fontSize(12).fillColor('#0f172a').text('Defects')
-    doc.moveDown(0.3)
-
-    if (input.defects.length === 0) {
-      doc.fontSize(10).fillColor('#475569').text('No defects logged.')
-    } else {
-      for (const defect of input.defects) {
-        doc.fontSize(10).fillColor('#0f172a').text(`${defect.title} [${defect.severity}] - ${defect.status}`)
-        if (defect.description) {
-          doc.fillColor('#475569').text(defect.description)
-        }
-        doc.moveDown(0.3)
-      }
-    }
-
-    const footer = input.company.reportFooter || 'Generated by MGMT Inspect'
-    doc.moveDown(1)
-    doc.fontSize(9).fillColor('#64748b').text(footer)
-
-    const range = doc.bufferedPageRange()
-    for (let i = range.start; i < range.start + range.count; i += 1) {
-      doc.switchToPage(i)
-      doc.fontSize(8)
-      doc.fillColor('#94a3b8')
-      doc.text(`Page ${i + 1} of ${range.count}`, 36, doc.page.height - 28, {
-        width: doc.page.width - 72,
-        align: 'right',
-      })
-    }
-
-    doc.end()
+  console.info('[archive-event]', {
+    event: input.event,
+    inspectionId: input.inspectionId,
+    machineId: input.machineId,
+    referenceNumber: input.referenceNumber,
+    timestamp: new Date().toISOString(),
+    ...(input.details ?? {}),
   })
 }
+
+function formatDateForFilename(value: string | null) {
+  const date = value ? new Date(value) : new Date()
+  if (Number.isNaN(date.getTime())) return new Date().toISOString().slice(0, 10)
+  return date.toISOString().slice(0, 10)
+}
+
+function sanitizeFilenamePart(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) return 'Unknown Machine'
+  return trimmed.replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').slice(0, 80)
+}
+
 
 async function loadInspectionArchiveData(inspectionId: string) {
   if (!supabaseAdmin) throw new Error(serverConfigErrorMessage)
 
   const { data: inspectionData, error: inspectionError } = await supabaseAdmin
     .from('inspections')
-    .select('id, machine_id, template_name, status, started_at, completed_at, operator_name, due_at')
+    .select('id, machine_id, schedule_id, template_name, status, started_at, completed_at, operator_name, due_at')
     .eq('id', inspectionId)
     .maybeSingle()
 
@@ -168,19 +111,67 @@ async function loadInspectionArchiveData(inspectionId: string) {
 
   const { data: machineData, error: machineError } = await supabaseAdmin
     .from('machines')
-    .select('id, name, area')
+    .select('id, name, area, code')
     .eq('id', inspectionData.machine_id as string)
     .maybeSingle()
 
   if (machineError) throw machineError
 
+  let inspectionFrequency: string | null = null
+  if (inspectionData.schedule_id) {
+    const { data: scheduleData } = await supabaseAdmin
+      .from('inspection_schedules')
+      .select('machine_template_id, machine_inspection_templates(inspection_frequency)')
+      .eq('id', inspectionData.schedule_id as string)
+      .maybeSingle()
+
+    const assignment = (scheduleData?.machine_inspection_templates as Record<string, unknown> | Record<string, unknown>[] | null) ?? null
+    const row = Array.isArray(assignment) ? assignment[0] : assignment
+    inspectionFrequency = (row?.inspection_frequency as string | null) ?? null
+  }
+
   const { data: itemsData, error: itemsError } = await supabaseAdmin
     .from('inspection_items')
-    .select('id, display_order, question, question_type, answer, comments, photos, signature_data')
+    .select('id, display_order, question, question_type, answer, comments')
     .eq('inspection_id', inspectionId)
     .order('display_order', { ascending: true })
 
   if (itemsError) throw itemsError
+
+  const itemIds = (itemsData ?? []).map((row) => row.id as string)
+  const photoByItemId = new Map<string, Array<{ id: string; url: string; timestamp: string; caption: string | null }>>()
+
+  if (itemIds.length > 0) {
+    const { data: photosData, error: photosError } = await supabaseAdmin
+      .from('photo_uploads')
+      .select('id, inspection_item_id, storage_path, caption, uploaded_at')
+      .in('inspection_item_id', itemIds)
+      .order('uploaded_at', { ascending: true })
+
+    if (photosError) {
+      const message = photosError.message.toLowerCase()
+      const photoTableMissing = message.includes("could not find the table 'public.photo_uploads'") || message.includes('photo_uploads')
+      if (!photoTableMissing) {
+        throw photosError
+      }
+      logArchiveStage('photo-evidence-unavailable', {
+        inspectionId,
+        reason: photosError.message,
+      })
+    } else {
+      for (const photo of photosData ?? []) {
+        const itemId = photo.inspection_item_id as string
+        const existing = photoByItemId.get(itemId) ?? []
+        existing.push({
+          id: photo.id as string,
+          url: photo.storage_path as string,
+          timestamp: (photo.uploaded_at as string | null) ?? new Date().toISOString(),
+          caption: (photo.caption as string | null) ?? null,
+        })
+        photoByItemId.set(itemId, existing)
+      }
+    }
+  }
 
   const { data: defectsData, error: defectsError } = await supabaseAdmin
     .from('defects')
@@ -189,16 +180,25 @@ async function loadInspectionArchiveData(inspectionId: string) {
 
   if (defectsError) throw defectsError
 
-  const items = (itemsData ?? []).map((row) => ({
-    id: row.id as string,
-    displayOrder: Number(row.display_order ?? 0),
-    question: row.question as string,
-    questionType: row.question_type as string,
-    answer: (row.answer as string | null) ?? null,
-    comments: (row.comments as string | null) ?? null,
-    photos: Array.isArray(row.photos) ? row.photos : [],
-    signatureData: (row.signature_data as string | null) ?? null,
-  }))
+  const items = (itemsData ?? []).map((row) => {
+    const answer = (row.answer as string | null) ?? null
+    const questionType = (row.question_type as string) ?? ''
+    const signatureData =
+      questionType.toLowerCase() === 'signature' && answer?.startsWith('data:image/')
+        ? answer
+        : null
+
+    return {
+      id: row.id as string,
+      displayOrder: Number(row.display_order ?? 0),
+      question: row.question as string,
+      questionType,
+      answer,
+      comments: (row.comments as string | null) ?? null,
+      photos: photoByItemId.get(row.id as string) ?? [],
+      signatureData,
+    }
+  })
 
   const defects = (defectsData ?? []).map((row) => ({
     id: row.id as string,
@@ -220,8 +220,10 @@ async function loadInspectionArchiveData(inspectionId: string) {
     id: inspectionData.id as string,
     machineId: inspectionData.machine_id as string,
     machineName: (machineData?.name as string) || 'Unknown Machine',
+    assetId: (machineData?.code as string | null) ?? null,
     machineArea: (machineData?.area as string | null) ?? null,
     templateName: (inspectionData.template_name as string) || 'Inspection',
+    inspectionFrequency,
     status: (inspectionData.status as string) || 'Completed',
     startedAt: (inspectionData.started_at as string | null) ?? null,
     completedAt: (inspectionData.completed_at as string | null) ?? null,
@@ -230,27 +232,6 @@ async function loadInspectionArchiveData(inspectionId: string) {
   }
 
   return { inspection, items, defects, overallResult }
-}
-
-function resolveSmtpTransport() {
-  const host = process.env.SMTP_HOST
-  const port = Number(process.env.SMTP_PORT || '587')
-  const user = process.env.SMTP_USER
-  const pass = process.env.SMTP_PASS
-  const from = process.env.SMTP_FROM
-
-  if (!host || !user || !pass || !from) {
-    return null
-  }
-
-  const transporter = nodemailer.createTransport({
-    host,
-    port,
-    secure: port === 465,
-    auth: { user, pass },
-  })
-
-  return { transporter, from }
 }
 
 async function logDelivery(input: {
@@ -266,19 +247,127 @@ async function logDelivery(input: {
 }) {
   if (!supabaseAdmin) throw new Error(serverConfigErrorMessage)
 
-  await supabaseAdmin.from('archive_delivery_logs').insert([
+  const result = await supabaseAdmin
+    .from('archive_delivery_logs')
+    .insert([
+      {
+        inspection_id: input.inspectionId,
+        archive_id: input.archiveId,
+        pdf_generated: input.pdfGenerated,
+        email_sent: input.emailSent,
+        archived: input.archived,
+        status: input.status,
+        failure_reason: input.failureReason ?? null,
+        retry_count: input.retryCount,
+        recipient_snapshot: input.recipients,
+        archive_status: input.archived ? 'archived' : input.status === 'failed' ? 'failed' : 'pending',
+        archive_last_error: input.failureReason ?? null,
+        archive_timestamp: new Date().toISOString(),
+        archive_reference: input.archiveId,
+      },
+    ])
+    .select('id')
+    .maybeSingle()
+
+  return (result.data?.id as string | undefined) ?? null
+}
+
+async function logInspectionEmailHistory(input: {
+  inspectionId: string
+  templateId: string | null
+  archiveId: string | null
+  recipientEmail: string
+  recipientType: 'to' | 'cc' | 'bcc'
+  subject: string
+  status: 'queued' | 'sent' | 'failed' | 'skipped'
+  errorMessage?: string | null
+}) {
+  if (!supabaseAdmin) throw new Error(serverConfigErrorMessage)
+
+  await supabaseAdmin.from('inspection_email_history').insert([
     {
       inspection_id: input.inspectionId,
+      template_id: input.templateId,
       archive_id: input.archiveId,
-      pdf_generated: input.pdfGenerated,
-      email_sent: input.emailSent,
-      archived: input.archived,
+      recipient_email: input.recipientEmail,
+      recipient_type: input.recipientType,
+      subject: input.subject,
       status: input.status,
-      failure_reason: input.failureReason ?? null,
-      retry_count: input.retryCount,
-      recipient_snapshot: input.recipients,
+      error_message: input.errorMessage ?? null,
+      sent_at: input.status === 'sent' ? new Date().toISOString() : null,
     },
   ])
+}
+
+async function createArchiveJob(input: {
+  inspectionId: string
+  archiveId: string | null
+  archiveDeliveryLogId: string | null
+  status: ArchiveJobStatus
+  archiveStatus: 'pending' | 'archived' | 'failed'
+  retryCount: number
+  archiveLastError?: string | null
+  nextRetryAt?: string | null
+}) {
+  if (!supabaseAdmin) throw new Error(serverConfigErrorMessage)
+
+  const nowIso = new Date().toISOString()
+  const result = await supabaseAdmin
+    .from('archive_jobs')
+    .insert([
+      {
+        inspection_id: input.inspectionId,
+        archive_id: input.archiveId,
+        archive_delivery_log_id: input.archiveDeliveryLogId,
+        status: input.status,
+        archive_status: input.archiveStatus,
+        archive_last_error: input.archiveLastError ?? null,
+        archive_timestamp: nowIso,
+        archive_reference: input.archiveId,
+        retry_count: input.retryCount,
+        next_retry_at: input.nextRetryAt ?? null,
+      },
+    ])
+    .select('id')
+    .maybeSingle()
+
+  return (result.data?.id as string | undefined) ?? null
+}
+
+async function enqueueEmailForRetry(input: {
+  inspectionId: string
+  recipientEmail: string
+  recipientType: 'to' | 'cc' | 'bcc'
+  subject: string
+  body: string
+  status: 'pending' | 'failed'
+  attemptCount: number
+  errorMessage?: string | null
+}) {
+  if (!supabaseAdmin) throw new Error(serverConfigErrorMessage)
+
+  const nowIso = new Date().toISOString()
+  const result = await supabaseAdmin.from('email_queue').insert([
+    {
+      inspection_id: input.inspectionId,
+      recipient_email: input.recipientEmail,
+      recipient_type: input.recipientType,
+      subject: input.subject,
+      body: input.body,
+      status: input.status,
+      attempt_count: input.attemptCount,
+      error_message: input.errorMessage ?? null,
+      last_attempt_at: input.status === 'failed' ? nowIso : null,
+      next_retry_at: input.status === 'failed' || input.status === 'pending'
+        ? new Date(Date.now() + 60 * 60 * 1000).toISOString()
+        : null,
+      created_at: nowIso,
+    },
+  ])
+
+  if (result.error && !result.error.message.toLowerCase().includes("could not find the table 'public.email_queue'")) {
+    throw result.error
+  }
 }
 
 async function updateInspectionArchiveState(input: {
@@ -307,22 +396,68 @@ async function updateInspectionArchiveState(input: {
 export async function archiveInspectionAndSendEmail(params: {
   inspectionId: string
   triggeredBy?: string
+  requireEmailDelivery?: boolean
 }) {
   if (!supabaseAdmin) throw new Error(serverConfigErrorMessage)
 
+  logArchiveStage('start', { inspectionId: params.inspectionId, triggeredBy: params.triggeredBy ?? null })
+
   const { inspection, items, defects, overallResult } = await loadInspectionArchiveData(params.inspectionId)
+  logArchiveStage('loaded-inspection', {
+    inspectionId: inspection.id,
+    itemCount: items.length,
+    defectCount: defects.length,
+    result: overallResult,
+  })
 
   const company = await getCompanySettings()
-  const pdf = await buildPdfBuffer({
-    company,
-    inspection,
+  logArchiveStage('loaded-company', {
+    inspectionId: inspection.id,
+    companyName: company.companyName,
+  })
+
+  const pdf = await createArchivePDF({
+    company: {
+      companyName: company.companyName,
+      logoUrl: company.logoUrl,
+      address: company.address,
+      telephone: company.telephone,
+      email: company.email,
+      website: company.website,
+      reportFooter: company.reportFooter,
+      primaryColor: company.reportPrimaryColor,
+      accentColor: company.reportAccentColor,
+    },
+    reportTitle: 'Inspection Archive Report',
+    machineName: inspection.machineName,
+    assetId: inspection.assetId,
+    department: inspection.machineArea,
+    templateName: inspection.templateName,
+    inspectionFrequency: inspection.inspectionFrequency,
+    inspectionStatus: inspection.status,
+    inspector: inspection.operatorName,
+    startedAt: inspection.startedAt,
+    completedAt: inspection.completedAt,
+    result: overallResult,
+    reference: inspection.id,
     items,
     defects,
-    overallResult,
+  })
+  logArchiveStage('pdf-generated', {
+    inspectionId: inspection.id,
+    bytes: pdf.byteLength,
+  })
+  logArchiveEvent({
+    event: 'pdf_generated',
+    inspectionId: inspection.id,
+    machineId: inspection.machineId,
+    referenceNumber: inspection.id,
+    details: { bytes: pdf.byteLength },
   })
 
   const checksum = crypto.createHash('sha256').update(pdf).digest('hex')
-  const fileName = `inspection-${inspection.id}.pdf`
+  const fileDate = formatDateForFilename(inspection.completedAt)
+  const fileName = `Inspection Report - ${sanitizeFilenamePart(inspection.machineName)} - ${fileDate}.pdf`
 
   const { data: archiveData, error: archiveError } = await supabaseAdmin
     .from('inspection_archives')
@@ -344,6 +479,10 @@ export async function archiveInspectionAndSendEmail(params: {
     .single()
 
   if (archiveError || !archiveData) {
+    logArchiveStage('archive-upsert-failed', {
+      inspectionId: inspection.id,
+      error: archiveError?.message ?? 'Unknown archive save failure',
+    })
     await updateInspectionArchiveState({
       inspectionId: inspection.id,
       archiveStatus: 'failed',
@@ -366,79 +505,75 @@ export async function archiveInspectionAndSendEmail(params: {
   }
 
   const archiveId = archiveData.id as string
-
-  const recipients = (await listEmailRecipients())
-    .filter((recipient) => recipient.enabled)
-    .filter((recipient) => {
-      if (!recipientMatchesInspection({
-        deliveryScope: recipient.deliveryScope,
-        hasDefects: defects.length > 0,
-        overallResult,
-      })) {
-        return false
-      }
-
-      if (recipient.departmentFilter && recipient.departmentFilter !== inspection.machineArea) {
-        return false
-      }
-
-      if (recipient.machineFilter && recipient.machineFilter !== inspection.machineId) {
-        return false
-      }
-
-      return true
-    })
-
-  const grouped = {
-    to: recipients.filter((r) => r.recipientType === 'to'),
-    cc: recipients.filter((r) => r.recipientType === 'cc'),
-    bcc: recipients.filter((r) => r.recipientType === 'bcc'),
-  }
-
-  const template = await getDefaultInspectionTemplate()
-
-  const subject = renderTemplate({
-    raw: template.subject,
-    vars: {
-      Machine: inspection.machineName,
-      Inspector: inspection.operatorName,
-      Department: inspection.machineArea || 'N/A',
-      Result: overallResult,
-      Date: formatDateTime(inspection.completedAt),
-      Reference: inspection.id,
-      Company: company.companyName,
-    },
+  logArchiveStage('archive-upserted', { inspectionId: inspection.id, archiveId, fileName })
+  logArchiveEvent({
+    event: 'archive_created',
+    inspectionId: inspection.id,
+    machineId: inspection.machineId,
+    referenceNumber: inspection.id,
+    details: { archiveId, fileName },
   })
 
-  const body = renderTemplate({
-    raw: template.body,
-    vars: {
-      Machine: inspection.machineName,
-      Inspector: inspection.operatorName,
-      Department: inspection.machineArea || 'N/A',
-      Result: overallResult,
-      Date: formatDateTime(inspection.completedAt),
-      Reference: inspection.id,
-      Company: company.companyName,
+  const archiveRecipient = resolveArchiveMailbox({ email: company.email, archiveEmail: (company as { archiveEmail?: string | null }).archiveEmail ?? null })
+  const companyName = resolveCompanyName(company)
+  const recipients = [
+    {
+      id: 'company-archive-mailbox',
+      name: 'Company Archive Mailbox',
+      email: archiveRecipient,
+      recipientType: 'to' as const,
     },
-  })
+  ]
 
-  const signature = renderTemplate({
-    raw: template.signature,
-    vars: {
-      Machine: inspection.machineName,
-      Inspector: inspection.operatorName,
-      Department: inspection.machineArea || 'N/A',
-      Result: overallResult,
-      Date: formatDateTime(inspection.completedAt),
-      Reference: inspection.id,
-      Company: company.companyName,
-    },
+  logArchiveStage('recipients-filtered', {
+    inspectionId: inspection.id,
+    totalRecipients: recipients.length,
+    to: 1,
+    cc: 0,
+    bcc: 0,
+    archiveRecipient,
   })
+  const emailContent = buildInspectionArchiveEmailTemplate({
+    machineName: inspection.machineName || 'N/A',
+    templateName: inspection.templateName || 'N/A',
+    inspector: inspection.operatorName || 'N/A',
+    result: overallResult,
+    completedAt: formatDateTime(inspection.completedAt),
+    reference: inspection.id || 'N/A',
+  })
+  const queuedSubject = applySubjectPrefix(emailContent.subject)
 
-  const smtp = resolveSmtpTransport()
+  const smtpState = await getSmtpTransport()
+  const smtp = smtpState.transport
+  logArchiveStage('smtp-resolved', {
+    inspectionId: inspection.id,
+    configured: Boolean(smtp),
+    warning: smtpState.warning ?? null,
+  })
+  let finalJobStatus: ArchiveJobStatus = 'running'
+  let finalArchiveStatus: 'pending' | 'archived' | 'failed' = 'pending'
+  let finalJobError: string | null = null
+  let finalNextRetryAt: string | null = null
+
+  const runningJobId = await createArchiveJob({
+    inspectionId: inspection.id,
+    archiveId,
+    archiveDeliveryLogId: null,
+    status: 'running',
+    archiveStatus: 'pending',
+    retryCount: 0,
+  })
 
   if (!smtp) {
+    const smtpMissingMessage = smtpState.warning || 'SMTP configuration is not available.'
+    if (params.requireEmailDelivery) {
+      throw new Error(smtpMissingMessage)
+    }
+
+    logArchiveStage('smtp-missing', {
+      inspectionId: inspection.id,
+      warning: smtpMissingMessage,
+    })
     // SMTP not configured - queue for later delivery instead of failing
     await updateInspectionArchiveState({
       inspectionId: inspection.id,
@@ -447,14 +582,14 @@ export async function archiveInspectionAndSendEmail(params: {
       archiveReference: archiveId,
     })
 
-    await logDelivery({
+    const logId = await logDelivery({
       inspectionId: inspection.id,
       archiveId,
       pdfGenerated: true,
       emailSent: false,
       archived: false,
       status: 'skipped',
-      failureReason: 'SMTP configuration is not available. Email will be queued for delivery.',
+      failureReason: smtpState.warning || 'SMTP configuration is not available. Email will be queued for delivery.',
       retryCount: 0,
       recipients: recipients.map((r) => ({
         type: r.recipientType,
@@ -463,114 +598,289 @@ export async function archiveInspectionAndSendEmail(params: {
       })),
     })
 
+    await createArchiveJob({
+      inspectionId: inspection.id,
+      archiveId,
+      archiveDeliveryLogId: logId,
+      status: 'retrying',
+      archiveStatus: 'pending',
+      retryCount: 0,
+      archiveLastError: smtpMissingMessage,
+      nextRetryAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    })
+    finalJobStatus = 'retrying'
+    finalArchiveStatus = 'pending'
+    finalJobError = smtpMissingMessage
+    finalNextRetryAt = new Date(Date.now() + 60 * 60 * 1000).toISOString()
+
     // Queue all emails for later delivery
     if (supabaseAdmin) {
-      for (const recipient of recipients) {
-        await supabaseAdmin.from('email_queue').insert([
-          {
-            inspection_id: inspection.id,
-            recipient_email: recipient.email,
-            recipient_type: recipient.recipientType,
-            subject,
-            body: `${body}\n\n${signature}`,
-            status: 'pending',
-            attempt_count: 0,
-            created_at: new Date().toISOString(),
-          },
-        ])
-      }
+      await enqueueEmailForRetry({
+        inspectionId: inspection.id,
+        recipientEmail: archiveRecipient,
+        recipientType: 'to',
+        subject: queuedSubject,
+        body: emailContent.text,
+        status: 'pending',
+        attemptCount: 0,
+      })
+
+      await logInspectionEmailHistory({
+        inspectionId: inspection.id,
+        templateId: null,
+        archiveId,
+        recipientEmail: archiveRecipient,
+        recipientType: 'to',
+        subject: queuedSubject,
+        status: 'queued',
+      })
     }
+
+    logArchiveEvent({
+      event: 'retry_queued',
+      inspectionId: inspection.id,
+      machineId: inspection.machineId,
+      referenceNumber: inspection.id,
+      details: { reason: smtpMissingMessage },
+    })
 
     return {
       inspectionId: inspection.id,
       archiveId,
       recipients: recipients.length,
       overallResult,
+      emailSent: false,
       queuedForDelivery: true,
     }
   }
 
-  if (grouped.to.length === 0 && grouped.cc.length === 0 && grouped.bcc.length === 0) {
-    await updateInspectionArchiveState({
+  try {
+    logArchiveStage('smtp-send-start', {
       inspectionId: inspection.id,
-      archiveStatus: 'failed',
-      archiveLastError: 'No recipients are configured for this inspection.',
+      to: 1,
+      cc: 0,
+      bcc: 0,
+    })
+    const mail = resolveEmailEnvelope({
+      subject: emailContent.subject,
+      recipientType: 'to',
+      recipientEmail: archiveRecipient,
+      smtp,
+      companyName,
     })
 
-    await logDelivery({
+    await smtp.transporter.sendMail({
+      from: mail.from,
+      to: mail.to,
+      cc: mail.cc,
+      bcc: mail.bcc,
+      replyTo: mail.replyTo,
+      subject: mail.subject,
+      text: emailContent.text,
+      html: emailContent.html,
+      attachments: [
+        {
+          filename: fileName,
+          content: pdf,
+          contentType: 'application/pdf',
+        },
+      ],
+    })
+    logArchiveStage('smtp-send-success', { inspectionId: inspection.id, archiveId })
+    logArchiveEvent({
+      event: 'email_sent',
+      inspectionId: inspection.id,
+      machineId: inspection.machineId,
+      referenceNumber: inspection.id,
+      details: { archiveId, recipient: archiveRecipient },
+    })
+
+    const logId = await logDelivery({
+      inspectionId: inspection.id,
+      archiveId,
+      pdfGenerated: true,
+      emailSent: true,
+      archived: true,
+      status: 'success',
+      retryCount: 0,
+      recipients: recipients.map((r) => ({
+        type: r.recipientType,
+        email: r.email,
+        name: r.name,
+      })),
+    })
+    logArchiveStage('delivery-log-created', { inspectionId: inspection.id, archiveId, logId })
+
+    await createArchiveJob({
+      inspectionId: inspection.id,
+      archiveId,
+      archiveDeliveryLogId: logId,
+      status: 'completed',
+      archiveStatus: 'archived',
+      retryCount: 0,
+    })
+    logArchiveStage('archive-job-completed', { inspectionId: inspection.id, archiveId })
+    finalJobStatus = 'completed'
+    finalArchiveStatus = 'archived'
+    finalJobError = null
+    finalNextRetryAt = null
+
+    for (const recipient of recipients) {
+      await logInspectionEmailHistory({
+        inspectionId: inspection.id,
+        templateId: null,
+        archiveId,
+        recipientEmail: recipient.email,
+        recipientType: recipient.recipientType,
+        subject: mail.subject,
+        status: 'sent',
+      })
+    }
+
+    await updateInspectionArchiveState({
+      inspectionId: inspection.id,
+      archiveStatus: 'archived',
+      archiveRetryCount: 0,
+      archiveLastError: null,
+      archiveReference: archiveId,
+      archivedAt: new Date().toISOString(),
+    })
+    logArchiveStage('archive-state-updated', { inspectionId: inspection.id, archiveId, archiveStatus: 'archived' })
+  } catch (emailError) {
+    const message = emailError instanceof Error ? emailError.message : 'Email delivery failed.'
+    if (params.requireEmailDelivery) {
+      throw emailError instanceof Error ? emailError : new Error(message)
+    }
+
+    logArchiveStage('smtp-send-failed', { inspectionId: inspection.id, archiveId, error: message })
+    logArchiveEvent({
+      event: 'email_failed',
+      inspectionId: inspection.id,
+      machineId: inspection.machineId,
+      referenceNumber: inspection.id,
+      details: { archiveId, error: message },
+    })
+
+    const logId = await logDelivery({
       inspectionId: inspection.id,
       archiveId,
       pdfGenerated: true,
       emailSent: false,
-      archived: false,
+      archived: true,
       status: 'failed',
-      failureReason: 'No recipients are configured for this inspection.',
       retryCount: 0,
-      recipients: [],
+      failureReason: message,
+      recipients: recipients.map((r) => ({ type: r.recipientType, email: r.email, name: r.name })),
+    })
+    logArchiveStage('delivery-log-created', { inspectionId: inspection.id, archiveId, logId, status: 'failed' })
+
+    await createArchiveJob({
+      inspectionId: inspection.id,
+      archiveId,
+      archiveDeliveryLogId: logId,
+      status: 'retrying',
+      archiveStatus: 'failed',
+      retryCount: 0,
+      archiveLastError: message,
+      nextRetryAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    })
+    logArchiveStage('archive-job-retrying', { inspectionId: inspection.id, archiveId, error: message })
+    finalJobStatus = 'retrying'
+    finalArchiveStatus = 'failed'
+    finalJobError = message
+    finalNextRetryAt = new Date(Date.now() + 60 * 60 * 1000).toISOString()
+
+    for (const recipient of recipients) {
+      await logInspectionEmailHistory({
+        inspectionId: inspection.id,
+        templateId: null,
+        archiveId,
+        recipientEmail: recipient.email,
+        recipientType: recipient.recipientType,
+        subject: queuedSubject,
+        status: 'failed',
+        errorMessage: message,
+      })
+
+      await enqueueEmailForRetry({
+        inspectionId: inspection.id,
+        recipientEmail: recipient.email,
+        recipientType: recipient.recipientType,
+        subject: queuedSubject,
+        body: emailContent.text,
+        status: 'failed',
+        attemptCount: 1,
+        errorMessage: message,
+      })
+    }
+
+    logArchiveEvent({
+      event: 'retry_queued',
+      inspectionId: inspection.id,
+      machineId: inspection.machineId,
+      referenceNumber: inspection.id,
+      details: { archiveId, error: message },
     })
 
-    throw new Error('No recipients are configured for this inspection.')
+    await updateInspectionArchiveState({
+      inspectionId: inspection.id,
+      archiveStatus: 'failed',
+      archiveLastError: message,
+      archiveReference: archiveId,
+    })
+    logArchiveStage('archive-state-updated', { inspectionId: inspection.id, archiveId, archiveStatus: 'failed' })
   }
 
-  await smtp.transporter.sendMail({
-    from: smtp.from,
-    to: grouped.to.map((r) => r.email).join(', ') || undefined,
-    cc: grouped.cc.map((r) => r.email).join(', ') || undefined,
-    bcc: grouped.bcc.map((r) => r.email).join(', ') || undefined,
-    subject,
-    text: `${body}\n\n${signature}`,
-    attachments: [
-      {
-        filename: fileName,
-        content: pdf,
-        contentType: 'application/pdf',
-      },
-    ],
-  })
-
-  await logDelivery({
-    inspectionId: inspection.id,
-    archiveId,
-    pdfGenerated: true,
-    emailSent: true,
-    archived: true,
-    status: 'success',
-    retryCount: 0,
-    recipients: recipients.map((r) => ({
-      type: r.recipientType,
-      email: r.email,
-      name: r.name,
-    })),
-  })
-
-  await updateInspectionArchiveState({
-    inspectionId: inspection.id,
-    archiveStatus: 'archived',
-    archiveRetryCount: 0,
-    archiveLastError: null,
-    archiveReference: archiveId,
-    archivedAt: new Date().toISOString(),
-  })
+  if (runningJobId) {
+    await supabaseAdmin
+      .from('archive_jobs')
+      .update({
+        status: finalJobStatus,
+        archive_status: finalArchiveStatus,
+        archive_last_error: finalJobError,
+        next_retry_at: finalNextRetryAt,
+        archive_timestamp: new Date().toISOString(),
+      })
+      .eq('id', runningJobId)
+  }
 
   return {
     inspectionId: inspection.id,
     archiveId,
     recipients: recipients.length,
     overallResult,
+    emailSent: true,
   }
 }
 
 export async function retryFailedArchiveDeliveries(maxRetries: number) {
   if (!supabaseAdmin) throw new Error(serverConfigErrorMessage)
 
+  const [company, smtpState] = await Promise.all([getCompanySettings(), getSmtpTransport()])
+  const companyName = resolveCompanyName(company)
+  const archiveRecipient = resolveArchiveMailbox({ email: company.email, archiveEmail: (company as { archiveEmail?: string | null }).archiveEmail ?? null })
+
   const { data, error } = await supabaseAdmin
     .from('inspections')
-    .select('id, archive_retry_count')
+    .select('id, machine_id, archive_retry_count, completed_at')
     .eq('archive_status', 'failed')
     .lt('archive_retry_count', maxRetries)
     .order('completed_at', { ascending: true })
 
   if (error) throw error
+
+  const machineIdSet = new Set((data ?? []).map((row) => row.machine_id as string).filter(Boolean))
+  const machineNames = new Map<string, string>()
+  if (machineIdSet.size > 0) {
+    const { data: machineRows } = await supabaseAdmin
+      .from('machines')
+      .select('id, name')
+      .in('id', Array.from(machineIdSet))
+
+    for (const row of machineRows ?? []) {
+      machineNames.set(row.id as string, (row.name as string) ?? 'N/A')
+    }
+  }
 
   let retried = 0
   let success = 0
@@ -588,8 +898,87 @@ export async function retryFailedArchiveDeliveries(maxRetries: number) {
     try {
       await archiveInspectionAndSendEmail({ inspectionId })
       success += 1
+      const machineId = (row.machine_id as string) ?? 'N/A'
+      const machineName = machineNames.get(machineId) ?? 'N/A'
+      logArchiveEvent({
+        event: 'retry_succeeded',
+        inspectionId,
+        machineId,
+        referenceNumber: inspectionId,
+      })
+
+      if (smtpState.transport) {
+        const template = buildArchiveRetryStatusTemplate({
+          success: true,
+          machineName,
+          reference: inspectionId,
+          completedAt: (row.completed_at as string | null) ?? new Date().toISOString(),
+        })
+        const envelope = resolveEmailEnvelope({
+          subject: template.subject,
+          recipientType: 'to',
+          recipientEmail: archiveRecipient,
+          smtp: smtpState.transport,
+          companyName,
+        })
+
+        try {
+          await smtpState.transport.transporter.sendMail({
+            from: envelope.from,
+            to: envelope.to,
+            cc: envelope.cc,
+            bcc: envelope.bcc,
+            replyTo: envelope.replyTo,
+            subject: envelope.subject,
+            text: template.text,
+            html: template.html,
+          })
+        } catch (notificationError) {
+          logArchiveStage('retry-notification-send-failed', {
+            inspectionId,
+            error: notificationError instanceof Error ? notificationError.message : 'Unknown notification error',
+          })
+        }
+      }
     } catch {
-      await logDelivery({
+      const machineId = (row.machine_id as string) ?? 'N/A'
+      const machineName = machineNames.get(machineId) ?? 'N/A'
+      if (smtpState.transport) {
+        const template = buildArchiveRetryStatusTemplate({
+          success: false,
+          machineName,
+          reference: inspectionId,
+          completedAt: new Date().toISOString(),
+          errorMessage: 'Retry failed.',
+        })
+        const envelope = resolveEmailEnvelope({
+          subject: template.subject,
+          recipientType: 'to',
+          recipientEmail: archiveRecipient,
+          smtp: smtpState.transport,
+          companyName,
+        })
+
+        try {
+          await smtpState.transport.transporter.sendMail({
+            from: envelope.from,
+            to: envelope.to,
+            cc: envelope.cc,
+            bcc: envelope.bcc,
+            replyTo: envelope.replyTo,
+            subject: envelope.subject,
+            text: template.text,
+            html: template.html,
+          })
+        } catch (notificationError) {
+          logArchiveStage('retry-notification-send-failed', {
+            inspectionId,
+            error: notificationError instanceof Error ? notificationError.message : 'Unknown notification error',
+          })
+        }
+      }
+
+      const logId = await logDelivery({
         inspectionId,
         archiveId: null,
         pdfGenerated: false,
@@ -599,6 +988,17 @@ export async function retryFailedArchiveDeliveries(maxRetries: number) {
         failureReason: 'Retry failed.',
         retryCount: currentRetryCount + 1,
         recipients: [],
+      })
+
+      await createArchiveJob({
+        inspectionId,
+        archiveId: null,
+        archiveDeliveryLogId: logId,
+        status: 'retrying',
+        archiveStatus: 'failed',
+        retryCount: currentRetryCount + 1,
+        archiveLastError: 'Retry failed.',
+        nextRetryAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
       })
     }
   }

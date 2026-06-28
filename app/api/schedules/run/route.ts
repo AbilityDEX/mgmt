@@ -22,6 +22,7 @@ export async function POST(request: Request) {
       checked: result.checkedCount,
       overdueMarked: result.overdueMarked,
       executedAt: result.processedAt,
+      scheduleRepair: result.scheduleRepair,
     })
   } catch (error) {
     return NextResponse.json(

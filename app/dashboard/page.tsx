@@ -20,10 +20,20 @@ export default function DashboardPage() {
   })
   const [scheduleWidgets, setScheduleWidgets] = useState({
     dueToday: 0,
+    dueTomorrow: 0,
     overdue: 0,
     upcomingThisWeek: 0,
     completedToday: 0,
+    failedInspections: 0,
+    passRate: 100,
+    totalOutstanding: 0,
     compliancePercentage: 100,
+    failedInspectionStarts: 0,
+    duplicateInspectionAttemptsBlocked: 0,
+    successfulStarts: 0,
+    successfulCompletions: 0,
+    cancelledInspections: 0,
+    lockDenials: 0,
   })
   const [scheduleBoard, setScheduleBoard] = useState<{
     dueToday: Array<{
@@ -179,10 +189,20 @@ export default function DashboardPage() {
     setScheduleWidgets(
       payload.widgets ?? {
         dueToday: 0,
+        dueTomorrow: 0,
         overdue: 0,
         upcomingThisWeek: 0,
         completedToday: 0,
+        failedInspections: 0,
+        passRate: 100,
+        totalOutstanding: 0,
         compliancePercentage: 100,
+        failedInspectionStarts: 0,
+        duplicateInspectionAttemptsBlocked: 0,
+        successfulStarts: 0,
+        successfulCompletions: 0,
+        cancelledInspections: 0,
+        lockDenials: 0,
       }
     )
     setScheduleBoard(
@@ -206,6 +226,14 @@ export default function DashboardPage() {
     void loadMachines()
     void loadDefectWidgets()
     void loadSchedulingData()
+
+    const timer = setInterval(() => {
+      void loadMachines()
+      void loadDefectWidgets()
+      void loadSchedulingData()
+    }, 60_000)
+
+    return () => clearInterval(timer)
   }, [loadDefectWidgets, loadMachines, loadSchedulingData])
 
   if (!authChecked) {
@@ -267,6 +295,10 @@ export default function DashboardPage() {
             <p className="mt-2 text-2xl font-semibold text-amber-300">{scheduleWidgets.dueToday}</p>
           </article>
           <article className="rounded-[24px] bg-slate-900/90 p-4 shadow-xl shadow-black/20">
+            <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Due Tomorrow</p>
+            <p className="mt-2 text-2xl font-semibold text-amber-200">{scheduleWidgets.dueTomorrow}</p>
+          </article>
+          <article className="rounded-[24px] bg-slate-900/90 p-4 shadow-xl shadow-black/20">
             <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Overdue Inspections</p>
             <p className="mt-2 text-2xl font-semibold text-rose-300">{scheduleWidgets.overdue}</p>
           </article>
@@ -281,6 +313,42 @@ export default function DashboardPage() {
           <article className="col-span-2 rounded-[24px] bg-slate-900/90 p-4 shadow-xl shadow-black/20">
             <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Compliance Percentage</p>
             <p className="mt-2 text-2xl font-semibold text-white">{scheduleWidgets.compliancePercentage}%</p>
+          </article>
+          <article className="rounded-[24px] bg-slate-900/90 p-4 shadow-xl shadow-black/20">
+            <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Failed Inspections</p>
+            <p className="mt-2 text-2xl font-semibold text-rose-300">{scheduleWidgets.failedInspections}</p>
+          </article>
+          <article className="rounded-[24px] bg-slate-900/90 p-4 shadow-xl shadow-black/20">
+            <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Pass Rate</p>
+            <p className="mt-2 text-2xl font-semibold text-emerald-300">{scheduleWidgets.passRate}%</p>
+          </article>
+          <article className="col-span-2 rounded-[24px] bg-slate-900/90 p-4 shadow-xl shadow-black/20">
+            <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Total Outstanding</p>
+            <p className="mt-2 text-2xl font-semibold text-white">{scheduleWidgets.totalOutstanding}</p>
+          </article>
+          <article className="rounded-[24px] bg-slate-900/90 p-4 shadow-xl shadow-black/20">
+            <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Successful Starts</p>
+            <p className="mt-2 text-2xl font-semibold text-emerald-300">{scheduleWidgets.successfulStarts}</p>
+          </article>
+          <article className="rounded-[24px] bg-slate-900/90 p-4 shadow-xl shadow-black/20">
+            <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Successful Completions</p>
+            <p className="mt-2 text-2xl font-semibold text-emerald-200">{scheduleWidgets.successfulCompletions}</p>
+          </article>
+          <article className="rounded-[24px] bg-slate-900/90 p-4 shadow-xl shadow-black/20">
+            <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Failed Starts</p>
+            <p className="mt-2 text-2xl font-semibold text-rose-300">{scheduleWidgets.failedInspectionStarts}</p>
+          </article>
+          <article className="rounded-[24px] bg-slate-900/90 p-4 shadow-xl shadow-black/20">
+            <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Duplicate Blocked</p>
+            <p className="mt-2 text-2xl font-semibold text-amber-300">{scheduleWidgets.duplicateInspectionAttemptsBlocked}</p>
+          </article>
+          <article className="rounded-[24px] bg-slate-900/90 p-4 shadow-xl shadow-black/20">
+            <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Lock Denials</p>
+            <p className="mt-2 text-2xl font-semibold text-amber-200">{scheduleWidgets.lockDenials}</p>
+          </article>
+          <article className="rounded-[24px] bg-slate-900/90 p-4 shadow-xl shadow-black/20">
+            <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Cancelled</p>
+            <p className="mt-2 text-2xl font-semibold text-slate-200">{scheduleWidgets.cancelledInspections}</p>
           </article>
 
           <article className="rounded-[24px] bg-slate-900/90 p-4 shadow-xl shadow-black/20">

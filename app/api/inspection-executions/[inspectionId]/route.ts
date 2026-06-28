@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server'
 import { requireAuth, serverConfigErrorMessage, supabaseAdmin } from '@/lib/admin'
 import { ensureDefectForFailedInspectionItem } from '@/lib/services/defects'
-import { archiveInspectionAndSendEmail } from '@/lib/services/archivePipeline'
-import { advanceScheduleFromCompletedInspection } from '@/lib/services/inspectionScheduling'
+import { trackInspectionEvent } from '@/lib/services/inspectionMetrics'
+import { completeInspectionWorkflow, InspectionCompletionError } from '@/lib/services/inspectionCompletion'
 
 type RouteContext = {
   params: Promise<{ inspectionId: string }>
@@ -143,10 +143,14 @@ export async function PATCH(request: Request, context: RouteContext) {
     | {
         type: 'complete'
       }
+    | {
+        type: 'cancel'
+        reason?: string
+      }
 
   const { data: inspectionData, error: inspectionError } = await supabaseAdmin
     .from('inspections')
-    .select('id, machine_id, status, schedule_id')
+    .select('id, machine_id, template_id, status, schedule_id')
     .eq('id', inspectionId)
     .maybeSingle()
 
@@ -239,105 +243,63 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 
   if (body.type === 'complete') {
-    const { data: itemsData, error: itemsError } = await supabaseAdmin
-      .from('inspection_items')
-      .select('id, question, required, answer, comments')
-      .eq('inspection_id', inspectionId)
-      .order('display_order', { ascending: true })
+    try {
+      const result = await completeInspectionWorkflow({ inspectionId, userId: auth.userId })
 
-    if (itemsError) {
-      return NextResponse.json({ error: itemsError.message }, { status: 500 })
-    }
-
-    for (const item of itemsData ?? []) {
-      const answer = normalizeAnswer(item.answer as string | null)
-      if (answer === 'fail') {
-        await ensureDefectForFailedInspectionItem({
-          machineId: inspectionData.machine_id as string,
-          inspectionId,
-          inspectionItemId: item.id as string,
-          createdBy: auth.userId,
-          title: item.question as string,
-          description: (item.comments as string | null) ?? null,
-        })
+      return NextResponse.json({
+        inspection: {
+          id: inspectionId,
+          status: result.status,
+          completedAt: result.completedAt,
+          archiveStatus: result.archiveStatus,
+        },
+        scheduleAdvanceResult: result.scheduleAdvanceResult,
+      })
+    } catch (error) {
+      if (error instanceof InspectionCompletionError) {
+        return NextResponse.json(
+          {
+            error: error.message,
+            stage: error.stage,
+            ...(error.details ?? {}),
+          },
+          { status: error.status }
+        )
       }
-    }
 
-    const items = itemsData ?? []
-    const incompleteRequired = items.filter((item) => {
-      if (!item.required) return false
-      const answer = normalizeAnswer(item.answer as string | null)
-      return !answer
-    })
-
-    if (incompleteRequired.length > 0) {
       return NextResponse.json(
         {
-          error: 'Please complete all required inspection items before finishing.',
-          incompleteItems: incompleteRequired.map((item) => ({
-            id: item.id as string,
-            question: item.question as string,
-          })),
+          error: error instanceof Error ? error.message : 'Inspection completion failed.',
+          stage: 'rollback',
         },
-        { status: 400 }
+        { status: 500 }
       )
     }
+  }
 
-    const completedAt = new Date().toISOString()
-
-    const legacyChecklist = items.map((item) => {
-      const answer = normalizeAnswer(item.answer as string | null)
-      return {
-        id: item.id as string,
-        label: item.question as string,
-        status: answer === 'fail' ? 'fail' : 'pass',
-        faultDescription: answer === 'fail' ? ((item.comments as string | null) ?? '') : undefined,
-      }
-    })
-
-    const { error: completeError } = await supabaseAdmin
+  if (body.type === 'cancel') {
+    const { error: cancelError } = await supabaseAdmin
       .from('inspections')
-      .update({
-        status: 'Completed',
-        completed_at: completedAt,
-        is_overdue: false,
-        archive_status: 'pending',
-        archive_last_error: null,
-        checklist: legacyChecklist,
-      })
+      .update({ status: 'Cancelled' })
       .eq('id', inspectionId)
 
-    if (completeError) {
-      return NextResponse.json({ error: completeError.message }, { status: 500 })
+    if (cancelError) {
+      return NextResponse.json({ error: cancelError.message }, { status: 500 })
     }
 
-    await supabaseAdmin
-      .from('machines')
-      .update({ status: 'Completed' })
-      .eq('id', inspectionData.machine_id as string)
-
-    await advanceScheduleFromCompletedInspection({
+    await trackInspectionEvent({
+      eventType: 'cancelled',
+      inspectionId,
+      machineId: inspectionData.machine_id as string,
       scheduleId: (inspectionData.schedule_id as string | null) ?? null,
-      completedAt: new Date(completedAt),
-    })
-
-    try {
-      await archiveInspectionAndSendEmail({
-        inspectionId,
-        triggeredBy: auth.userId,
-      })
-    } catch (archiveError) {
-      // Archive failed but inspection is still completed
-      // The email will be queued or retry later
-      console.error('Archive failed:', archiveError)
-    }
+      userId: auth.userId,
+      details: { reason: body.reason ?? null },
+    }).catch(() => undefined)
 
     return NextResponse.json({
       inspection: {
         id: inspectionId,
-        status: 'Completed',
-        completedAt,
-        archiveStatus: 'archived',
+        status: 'Cancelled',
       },
     })
   }

@@ -80,5 +80,5 @@ export function renderTemplate(input: {
     output = output.split(`{{${key}}}`).join(value)
   }
 
-  return output
+  return output.replace(/\\n/g, '\n')
 }

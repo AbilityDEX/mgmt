@@ -39,6 +39,16 @@ type UpdateTemplateBody = {
   items?: Array<{ id?: string; question?: string; question_type?: InspectionQuestionType; required?: boolean; display_order?: number }>
 }
 
+type AssignedMachine = {
+  id?: string
+  name?: string
+}
+
+type MachineAssignmentRow = {
+  machine_id: string
+  machines?: AssignedMachine | AssignedMachine[] | null
+}
+
 export async function GET(request: Request) {
   const auth = await requireAdmin(request)
   if ('error' in auth) {
@@ -376,9 +386,10 @@ export async function DELETE(request: Request) {
   }
 
   if (machineAssignments && machineAssignments.length > 0) {
-    const machineNames = (machineAssignments as Array<Record<string, unknown>>)
+    const assignments = machineAssignments as MachineAssignmentRow[]
+    const machineNames = assignments
       .map((row) => {
-        const machinesData = row.machines as any
+        const machinesData = row.machines
         const machine = Array.isArray(machinesData) ? machinesData[0] : machinesData
         return machine?.name
       })
@@ -387,8 +398,8 @@ export async function DELETE(request: Request) {
     return NextResponse.json(
       {
         error: `Cannot delete template - it is currently assigned to ${machineAssignments.length} machine(s): ${machineNames}. Please reassign or remove these machines first.`,
-        affectedMachines: machineAssignments.map((row) => {
-          const machinesData = row.machines as any
+        affectedMachines: assignments.map((row) => {
+          const machinesData = row.machines
           const machine = Array.isArray(machinesData) ? machinesData[0] : machinesData
           return {
             id: row.machine_id,

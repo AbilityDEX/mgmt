@@ -169,21 +169,11 @@ export async function POST(request: Request) {
 
   const inspectionId = (data as Record<string, unknown>).id as string
 
+  let archiveWarning: string | null = null
   try {
     await archiveInspectionAndSendEmail({ inspectionId, triggeredBy: auth.userId })
   } catch (archiveError) {
-    return NextResponse.json(
-      {
-        error: archiveError instanceof Error ? archiveError.message : 'Inspection archived delivery failed.',
-        inspection: {
-          id: inspectionId,
-          machineId: body.machine_id,
-          operatorName: body.operator_name,
-          archiveStatus: 'failed',
-        },
-      },
-      { status: 502 }
-    )
+    archiveWarning = archiveError instanceof Error ? archiveError.message : 'Inspection archived delivery failed.'
   }
 
   return NextResponse.json({
@@ -191,7 +181,8 @@ export async function POST(request: Request) {
       id: inspectionId,
       machineId: body.machine_id,
       operatorName: body.operator_name,
-      archiveStatus: 'archived',
+      archiveStatus: archiveWarning ? 'failed' : 'archived',
     },
+    warning: archiveWarning,
   })
 }

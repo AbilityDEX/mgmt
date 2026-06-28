@@ -4,6 +4,7 @@ import {
   calculateNextDue,
   ensureScheduleForMachineTemplate,
   getScheduleOverview,
+  runInspectionScheduler,
   scheduleFrequencies,
   ScheduleFrequency,
 } from '@/lib/services/inspectionScheduling'
@@ -28,6 +29,7 @@ export async function GET(request: Request) {
   const machineId = url.searchParams.get('machine_id')?.trim() ?? ''
 
   try {
+    await runInspectionScheduler()
     const overview = await getScheduleOverview()
 
     if (machineId) {

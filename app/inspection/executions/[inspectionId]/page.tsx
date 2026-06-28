@@ -15,21 +15,7 @@ async function getToken(): Promise<string | null> {
 export default function InspectionExecutionPage() {
   const params = useParams<{ inspectionId: string }>()
   const inspectionId = params.inspectionId
-
-  if (!inspectionId || inspectionId === 'undefined') {
-    return (
-      <main className="min-h-screen bg-slate-950 text-slate-100">
-        <div className="mx-auto max-w-4xl px-4 pb-24 pt-6">
-          <div className="rounded-[20px] bg-rose-600/15 px-5 py-3 text-sm font-medium text-rose-300">
-            Invalid inspection ID. Please start an inspection from the machine page.
-          </div>
-          <Link href="/inspection" className="mt-4 inline-flex rounded-3xl bg-slate-800 px-4 py-3 text-sm font-semibold text-slate-100 shadow-[0_10px_25px_rgba(0,0,0,0.2)] transition hover:bg-slate-700">
-            ← Back to Machines
-          </Link>
-        </div>
-      </main>
-    )
-  }
+  const hasInvalidInspectionId = !inspectionId || inspectionId === 'undefined'
 
   const [inspection, setInspection] = useState<Inspection | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -282,6 +268,21 @@ export default function InspectionExecutionPage() {
     } finally {
       setCompleting(false)
     }
+  }
+
+  if (hasInvalidInspectionId) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-100">
+        <div className="mx-auto max-w-4xl px-4 pb-24 pt-6">
+          <div className="rounded-[20px] bg-rose-600/15 px-5 py-3 text-sm font-medium text-rose-300">
+            Invalid inspection ID. Please start an inspection from the machine page.
+          </div>
+          <Link href="/inspection" className="mt-4 inline-flex rounded-3xl bg-slate-800 px-4 py-3 text-sm font-semibold text-slate-100 shadow-[0_10px_25px_rgba(0,0,0,0.2)] transition hover:bg-slate-700">
+            ← Back to Machines
+          </Link>
+        </div>
+      </main>
+    )
   }
 
   return (

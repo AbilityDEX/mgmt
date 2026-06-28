@@ -105,7 +105,7 @@ export default function AdminEmailTemplatesPage() {
           </Link>
           <p className="text-xs uppercase tracking-[0.35em] text-emerald-400">Administration</p>
           <h1 className="mt-2 text-2xl font-semibold">Email Templates</h1>
-          <p className="mt-2 text-sm text-slate-400">Supported variables: {'{{Machine}} {{Inspector}} {{Department}} {{Result}} {{Date}} {{Reference}}'}</p>
+          <p className="mt-2 text-sm text-slate-400">Supported variables: {'{{Machine}} {{Inspector}} {{Department}} {{Result}} {{Date}} {{Reference}} {{Company}} {{NextInspection}}'}</p>
         </div>
 
         {message ? <div className="mb-4 rounded-[20px] bg-emerald-600/15 px-5 py-3 text-sm font-medium text-emerald-300">{message}</div> : null}

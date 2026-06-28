@@ -2,9 +2,18 @@ import { serverConfigErrorMessage, supabaseAdmin } from '@/lib/admin'
 import type { CompanySettings } from '@/lib/types/release1'
 
 function mapCompanySettingsRow(row: Record<string, unknown>): CompanySettings {
+  const smtpConfig = (row.smtp_config as Record<string, unknown> | null) ?? null
+  const orgSettings = (smtpConfig?.orgSettings as Record<string, unknown> | null) ?? null
+
   return {
     id: row.id as string,
     companyName: (row.company_name as string) ?? 'MGMT Inspect',
+    archiveEmail: (orgSettings?.archiveEmail as string | null) ?? (row.archive_email as string | null) ?? null,
+    supportEmail: (orgSettings?.supportEmail as string | null) ?? null,
+    timezone: (orgSettings?.timezone as string | null) ?? null,
+    dateFormat: (orgSettings?.dateFormat as string | null) ?? null,
+    timeFormat: (orgSettings?.timeFormat as string | null) ?? null,
+    defaultReplyTo: (smtpConfig?.replyToEmail as string | null) ?? null,
     logoUrl: (row.logo_url as string | null) ?? null,
     address: (row.address as string | null) ?? null,
     telephone: (row.telephone as string | null) ?? null,

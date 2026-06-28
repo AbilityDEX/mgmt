@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 import { requireAuth, serverConfigErrorMessage, supabaseAdmin } from '@/lib/admin'
+import { repairInspectionScheduleCoverage, runInspectionScheduler } from '@/lib/services/inspectionScheduling'
+import { trackInspectionEvent } from '@/lib/services/inspectionMetrics'
 
 type InspectionStatus = 'In Progress' | 'Completed' | 'Cancelled'
 type InspectionResult = 'PASS' | 'FAIL' | 'INCOMPLETE'
@@ -10,6 +12,18 @@ type SnapshotTemplateItem = {
   question: string
   question_type: string
   required: boolean
+}
+
+type ScheduleRow = {
+  machine_template_id: string
+  next_due: string
+  active: boolean
+}
+
+function formatDateTime(value: string | null) {
+  if (!value) return 'N/A'
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? 'N/A' : parsed.toLocaleString()
 }
 
 export async function GET(request: Request) {
@@ -24,6 +38,8 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url)
   const machineId = url.searchParams.get('machine_id')
+
+  await runInspectionScheduler()
 
   // VALIDATION: machineId must be valid before proceeding
   if (!machineId || machineId === 'undefined' || machineId === '') {
@@ -61,7 +77,8 @@ export async function GET(request: Request) {
   }
 
   const templateIds = (assignmentsData ?? []).map((a) => a.template_id as string)
-  let templatesById = new Map<string, { id: string; name: string }>()
+  const assignmentIds = (assignmentsData ?? []).map((a) => a.id as string)
+  const templatesById = new Map<string, { id: string; name: string }>()
 
   if (templateIds.length > 0) {
     const { data: templatesData, error: templatesError } = await supabaseAdmin
@@ -77,6 +94,19 @@ export async function GET(request: Request) {
           name: (template.name as string) || 'Unnamed',
         })
       }
+    }
+  }
+
+  const scheduleByAssignmentId = new Map<string, ScheduleRow>()
+  if (assignmentIds.length > 0) {
+    const { data: schedulesData } = await supabaseAdmin
+      .from('inspection_schedules')
+      .select('machine_template_id, next_due, active')
+      .in('machine_template_id', assignmentIds)
+      .eq('active', true)
+
+    for (const schedule of (schedulesData ?? []) as ScheduleRow[]) {
+      scheduleByAssignmentId.set(schedule.machine_template_id, schedule)
     }
   }
 
@@ -170,12 +200,19 @@ export async function GET(request: Request) {
       : null,
     assignedTemplates: (assignmentsData ?? []).map((assignment) => {
       const template = templatesById.get(assignment.template_id as string)
+      const schedule = scheduleByAssignmentId.get(assignment.id as string)
+      const nextDue = schedule?.next_due ?? null
+      const now = new Date()
+      const isLocked = Boolean(nextDue && new Date(nextDue) > now)
 
       return {
         templateId: assignment.template_id as string,
         templateName: template?.name || 'Unnamed Template',
         inspectionFrequency: (assignment.inspection_frequency as string) || 'Monthly',
         active: Boolean(assignment.active),
+        nextDue,
+        isLocked,
+        lockMessage: isLocked && nextDue ? `Next inspection available on ${formatDateTime(nextDue)}` : null,
       }
     }),
     inspections: inspections.map((inspection) => ({
@@ -220,6 +257,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: serverConfigErrorMessage }, { status: 500 })
   }
 
+  // Automatically repair legacy assignment records that never had schedules created.
+  await repairInspectionScheduleCoverage()
+
   const body = (await request.json()) as {
     machine_id?: string
     template_id?: string
@@ -230,12 +270,18 @@ export async function POST(request: Request) {
 
   // VALIDATION: Reject undefined machine IDs
   if (!machineId || machineId === 'undefined') {
+    await trackInspectionEvent({
+      eventType: 'failed_start',
+      machineId: machineId || null,
+      userId: auth.userId,
+      details: { reason: 'invalid_machine_id' },
+    }).catch(() => undefined)
     return NextResponse.json({ error: `Invalid machine_id: ${JSON.stringify(machineId)}` }, { status: 400 })
   }
 
   const { data: machineData, error: machineError } = await supabaseAdmin
     .from('machines')
-    .select('id, name')
+    .select('id, name, grace_period, status')
     .eq('id', machineId)
     .maybeSingle()
 
@@ -244,12 +290,18 @@ export async function POST(request: Request) {
   }
 
   if (!machineData) {
+    await trackInspectionEvent({
+      eventType: 'failed_start',
+      machineId,
+      userId: auth.userId,
+      details: { reason: 'machine_not_found' },
+    }).catch(() => undefined)
     return NextResponse.json({ error: 'Machine not found.' }, { status: 404 })
   }
 
   const { data: assignmentsData, error: assignmentsError } = await supabaseAdmin
     .from('machine_inspection_templates')
-    .select('template_id, active')
+    .select('id, template_id, inspection_frequency, active')
     .eq('machine_id', machineId)
     .eq('active', true)
 
@@ -258,7 +310,7 @@ export async function POST(request: Request) {
   }
 
   const assignmentTemplateIds = (assignmentsData ?? []).map((a) => a.template_id as string)
-  let assignmentTemplatesById = new Map<string, { id: string; name: string }>()
+  const assignmentTemplatesById = new Map<string, { id: string; name: string }>()
 
   if (assignmentTemplateIds.length > 0) {
     const { data: assignmentTemplatesData } = await supabaseAdmin
@@ -278,12 +330,20 @@ export async function POST(request: Request) {
     const template = assignmentTemplatesById.get(assignment.template_id as string)
 
     return {
+      id: assignment.id as string,
       templateId: assignment.template_id as string,
+      inspectionFrequency: (assignment.inspection_frequency as string) || 'Monthly',
       templateName: template?.name || 'Unnamed Template',
     }
   })
 
   if (assignments.length === 0) {
+    await trackInspectionEvent({
+      eventType: 'failed_start',
+      machineId,
+      userId: auth.userId,
+      details: { reason: 'no_template_assignment' },
+    }).catch(() => undefined)
     return NextResponse.json({ error: 'No inspection templates assigned.' }, { status: 400 })
   }
 
@@ -295,9 +355,95 @@ export async function POST(request: Request) {
     selectedTemplateId = assignments[0].templateId
   }
 
-  const selectedTemplate = assignments.find((assignment) => assignment.templateId === selectedTemplateId)
-  if (!selectedTemplate) {
+  const selectedAssignment = assignments.find((assignment) => assignment.templateId === selectedTemplateId)
+  if (!selectedAssignment) {
+    await trackInspectionEvent({
+      eventType: 'failed_start',
+      machineId,
+      userId: auth.userId,
+      details: { reason: 'template_not_assigned', templateId: selectedTemplateId },
+    }).catch(() => undefined)
     return NextResponse.json({ error: 'Selected template is not assigned to this machine.' }, { status: 400 })
+  }
+
+  const { data: scheduleData, error: scheduleError } = await supabaseAdmin
+    .from('inspection_schedules')
+    .select('id, next_due, active, machine_template_id')
+    .eq('machine_template_id', selectedAssignment.id)
+    .eq('active', true)
+    .maybeSingle()
+
+  if (scheduleError) {
+    return NextResponse.json({ error: scheduleError.message }, { status: 500 })
+  }
+
+  if (!scheduleData?.id) {
+    await trackInspectionEvent({
+      eventType: 'failed_start',
+      machineId,
+      userId: auth.userId,
+      details: { reason: 'missing_schedule', assignmentId: selectedAssignment.id },
+    }).catch(() => undefined)
+    return NextResponse.json({ error: 'Inspection schedule is missing for this machine/template assignment.' }, { status: 409 })
+  }
+
+  const { data: latestCompletedInspection } = await supabaseAdmin
+    .from('inspections')
+    .select('completed_at')
+    .eq('schedule_id', scheduleData.id as string)
+    .eq('status', 'Completed')
+    .order('completed_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  const now = new Date()
+  const nextDue = scheduleData?.next_due ? new Date(scheduleData.next_due as string) : null
+  const nextDueIso = (scheduleData?.next_due as string | undefined) ?? null
+  console.info('Inspection start validation', {
+    machine_id: machineId,
+    template_id: selectedTemplateId,
+    machine_template_assignment_id: selectedAssignment.id,
+    schedule_id: scheduleData.id as string,
+    inspection_frequency: selectedAssignment.inspectionFrequency,
+    completed_at: (latestCompletedInspection?.completed_at as string | null) ?? null,
+    next_due: nextDueIso,
+    grace_period: Number(machineData.grace_period ?? 0),
+    current_status: (machineData.status as string | null) ?? null,
+  })
+
+  if (nextDue && !Number.isNaN(nextDue.getTime()) && nextDue > now) {
+    await trackInspectionEvent({
+      eventType: 'lock_denial',
+      machineId,
+      scheduleId: scheduleData.id as string,
+      userId: auth.userId,
+      details: { nextDue: nextDueIso },
+    }).catch(() => undefined)
+    return NextResponse.json(
+      {
+        error: `Inspection is locked until ${nextDueIso}.`,
+        nextDue: nextDueIso,
+      },
+      { status: 409 }
+    )
+  }
+
+  const { data: openInspection } = await supabaseAdmin
+    .from('inspections')
+    .select('id')
+    .eq('schedule_id', scheduleData.id as string)
+    .eq('status', 'In Progress')
+    .maybeSingle()
+
+  if (openInspection?.id) {
+    await trackInspectionEvent({
+      eventType: 'duplicate_start_blocked',
+      machineId,
+      scheduleId: scheduleData.id as string,
+      userId: auth.userId,
+      details: { existingInspectionId: openInspection.id as string },
+    }).catch(() => undefined)
+    return NextResponse.json({ error: 'This inspection is already in progress.' }, { status: 409 })
   }
 
   const { data: templateItemsData, error: templateItemsError } = await supabaseAdmin
@@ -313,6 +459,13 @@ export async function POST(request: Request) {
   const templateItems = (templateItemsData ?? []) as SnapshotTemplateItem[]
 
   if (templateItems.length === 0) {
+    await trackInspectionEvent({
+      eventType: 'failed_start',
+      machineId,
+      scheduleId: scheduleData.id as string,
+      userId: auth.userId,
+      details: { reason: 'template_has_no_items', templateId: selectedTemplateId },
+    }).catch(() => undefined)
     return NextResponse.json({ error: 'Selected template has no inspection items.' }, { status: 400 })
   }
 
@@ -335,13 +488,15 @@ export async function POST(request: Request) {
       {
         machine_id: machineId,
         template_id: selectedTemplateId,
-        template_name: selectedTemplate.templateName,
+        template_name: selectedAssignment.templateName,
         template_version: 1,
         status: 'In Progress',
         started_by: auth.userId,
         started_at: startedAt,
         operator_id: auth.userId,
         operator_name: operatorName,
+        schedule_id: scheduleData.id as string,
+        due_at: nextDueIso,
         checklist: [],
       },
     ])
@@ -349,6 +504,39 @@ export async function POST(request: Request) {
     .single()
 
   if (inspectionError || !inspectionData) {
+    const message = inspectionError?.message || 'Failed to create inspection.'
+    if (message.startsWith('LOCKED_UNTIL:')) {
+      const nextDueFromDb = message.replace('LOCKED_UNTIL:', '').trim()
+      await trackInspectionEvent({
+        eventType: 'lock_denial',
+        machineId,
+        scheduleId: scheduleData.id as string,
+        userId: auth.userId,
+        details: { source: 'db_trigger', nextDue: nextDueFromDb },
+      }).catch(() => undefined)
+      return NextResponse.json({ error: `Inspection is locked until ${nextDueFromDb}.`, nextDue: nextDueFromDb }, { status: 409 })
+    }
+
+    if (message.startsWith('DUPLICATE_IN_PROGRESS:')) {
+      const existingInspectionId = message.replace('DUPLICATE_IN_PROGRESS:', '').trim()
+      await trackInspectionEvent({
+        eventType: 'duplicate_start_blocked',
+        machineId,
+        scheduleId: scheduleData.id as string,
+        userId: auth.userId,
+        details: { source: 'db_trigger', existingInspectionId },
+      }).catch(() => undefined)
+      return NextResponse.json({ error: 'This inspection is already in progress.' }, { status: 409 })
+    }
+
+    await trackInspectionEvent({
+      eventType: 'failed_start',
+      machineId,
+      scheduleId: scheduleData.id as string,
+      userId: auth.userId,
+      details: { reason: 'insert_failed', message },
+    }).catch(() => undefined)
+
     return NextResponse.json(
       { error: inspectionError?.message || 'Failed to create inspection.' },
       { status: 500 }
@@ -373,15 +561,32 @@ export async function POST(request: Request) {
 
   if (snapshotItemsError) {
     await supabaseAdmin.from('inspections').delete().eq('id', inspectionId)
+    await trackInspectionEvent({
+      eventType: 'failed_start',
+      inspectionId,
+      machineId,
+      scheduleId: scheduleData.id as string,
+      userId: auth.userId,
+      details: { reason: 'snapshot_items_failed', message: snapshotItemsError.message },
+    }).catch(() => undefined)
     return NextResponse.json({ error: snapshotItemsError.message }, { status: 500 })
   }
+
+  await trackInspectionEvent({
+    eventType: 'start_success',
+    inspectionId,
+    machineId,
+    scheduleId: scheduleData.id as string,
+    userId: auth.userId,
+    details: { templateId: selectedTemplateId },
+  }).catch(() => undefined)
 
   return NextResponse.json({
     inspection: {
       id: inspectionId,
       machineId,
       templateId: selectedTemplateId,
-      templateName: selectedTemplate.templateName,
+      templateName: selectedAssignment.templateName,
       status: 'In Progress' as InspectionStatus,
       startedAt,
     },

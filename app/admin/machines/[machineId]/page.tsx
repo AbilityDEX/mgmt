@@ -64,6 +64,9 @@ type AssignedTemplateForStart = {
   templateName: string
   inspectionFrequency: string
   active: boolean
+  nextDue: string | null
+  isLocked: boolean
+  lockMessage: string | null
 }
 
 function formatDisplayDate(value: string | null) {
@@ -132,6 +135,18 @@ export default function AdminMachineDetailsPage() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
+  const selectedStartTemplate = useMemo(
+    () => templatesForStart.find((template) => template.templateId === selectedStartTemplateId) ?? templatesForStart[0] ?? null,
+    [selectedStartTemplateId, templatesForStart]
+  )
+  const hasStartableTemplate = templatesForStart.some((template) => !template.isLocked)
+  const allTemplatesLocked = templatesForStart.length > 0 && !hasStartableTemplate
+  const startLockMessage =
+    allTemplatesLocked && selectedStartTemplate
+      ? selectedStartTemplate.lockMessage ??
+        (selectedStartTemplate.nextDue ? `Next inspection available on ${formatDisplayDate(selectedStartTemplate.nextDue)}` : null)
+      : null
+
   const inputClass =
     'mt-2 w-full rounded-3xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-100 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/20'
 
@@ -178,7 +193,14 @@ export default function AdminMachineDetailsPage() {
     }
 
     setInspectionHistory(payload.inspections ?? [])
-    setTemplatesForStart(payload.assignedTemplates ?? [])
+    setTemplatesForStart(
+      (payload.assignedTemplates ?? []).map((template: AssignedTemplateForStart) => ({
+        ...template,
+        nextDue: template.nextDue ?? null,
+        isLocked: Boolean(template.isLocked),
+        lockMessage: template.lockMessage ?? null,
+      }))
+    )
 
     const defaultStartTemplate = payload.assignedTemplates?.[0]?.templateId ?? ''
     if (!selectedStartTemplateId && defaultStartTemplate) {
@@ -341,6 +363,14 @@ export default function AdminMachineDetailsPage() {
       const payload = await response.json()
 
       if (!response.ok || !payload.inspection?.id) {
+        if (response.status === 409) {
+          await loadInspectionHistory()
+          const lockError = payload.nextDue
+            ? `Next inspection available on ${formatDisplayDate(payload.nextDue as string)}`
+            : payload.error
+          setError(lockError || 'Failed to start inspection.')
+          return
+        }
         setError(payload.error || 'Failed to start inspection.')
         return
       }
@@ -697,11 +727,13 @@ export default function AdminMachineDetailsPage() {
                 type="button"
                 onClick={handleStartInspectionClick}
                 className="rounded-3xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-[0_10px_25px_rgba(16,185,129,0.25)] transition hover:bg-emerald-500 disabled:opacity-60"
-                disabled={starting || isLoading || templatesForStart.length === 0}
+                disabled={starting || isLoading || templatesForStart.length === 0 || !hasStartableTemplate}
               >
-                {starting ? 'Starting...' : 'Start Inspection'}
+                {starting ? 'Starting...' : !hasStartableTemplate ? 'Locked' : 'Start Inspection'}
               </button>
             </div>
+
+            {allTemplatesLocked && startLockMessage ? <p className="mb-4 text-sm text-amber-300">{startLockMessage}</p> : null}
 
             {templatesForStart.length === 0 ? (
               <div className="mb-4 rounded-3xl bg-slate-950/80 px-4 py-4 text-sm text-slate-300">
@@ -1014,7 +1046,7 @@ export default function AdminMachineDetailsPage() {
                 onClick={() => {
                   void handleStartInspection(selectedStartTemplateId)
                 }}
-                disabled={!selectedStartTemplateId || starting}
+                disabled={!selectedStartTemplateId || starting || templatesForStart.find((template) => template.templateId === selectedStartTemplateId)?.isLocked}
                 className="rounded-3xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white shadow-[0_10px_25px_rgba(16,185,129,0.25)] transition hover:bg-emerald-500 disabled:opacity-60"
               >
                 {starting ? 'Starting...' : 'Start'}

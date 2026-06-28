@@ -936,14 +936,20 @@ export type Database = {
           assigned_user: string | null
           code: string | null
           created_at: string
+          auto_generate_inspection: boolean | null
+          custom_interval_unit: string | null
+          custom_interval_value: number | null
           id: string
           inspection_deadline: string
+          inspection_frequency: string | null
           installation_date: string | null
           last_inspection: string | null
           manufacturer: string | null
           model: string | null
           name: string
           notes: string | null
+          reminder_days_before_due: number | null
+          grace_period: number | null
           serial_number: string | null
           status: string
           template_id: string | null
@@ -954,16 +960,22 @@ export type Database = {
           active?: boolean
           area: string
           assigned_user?: string | null
+          auto_generate_inspection?: boolean | null
           code?: string | null
           created_at?: string
+          custom_interval_unit?: string | null
+          custom_interval_value?: number | null
           id?: string
           inspection_deadline?: string
+          inspection_frequency?: string | null
           installation_date?: string | null
           last_inspection?: string | null
           manufacturer?: string | null
           model?: string | null
           name: string
           notes?: string | null
+          reminder_days_before_due?: number | null
+          grace_period?: number | null
           serial_number?: string | null
           status?: string
           template_id?: string | null
@@ -974,16 +986,22 @@ export type Database = {
           active?: boolean
           area?: string
           assigned_user?: string | null
+          auto_generate_inspection?: boolean | null
           code?: string | null
           created_at?: string
+          custom_interval_unit?: string | null
+          custom_interval_value?: number | null
           id?: string
           inspection_deadline?: string
+          inspection_frequency?: string | null
           installation_date?: string | null
           last_inspection?: string | null
           manufacturer?: string | null
           model?: string | null
           name?: string
           notes?: string | null
+          reminder_days_before_due?: number | null
+          grace_period?: number | null
           serial_number?: string | null
           status?: string
           template_id?: string | null

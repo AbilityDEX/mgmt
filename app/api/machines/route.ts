@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 import { requireAdmin, requireAuth, serverConfigErrorMessage, supabaseAdmin } from '@/lib/admin'
+import { runInspectionScheduler } from '@/lib/services/inspectionScheduling'
+import { ensureScheduleForMachineTemplate, type ScheduleFrequency } from '@/lib/services/inspectionScheduling'
 
 function computeStatus(raw: string, deadline: string): string {
   if (raw === 'Completed' || raw === 'In Progress') return raw
@@ -7,6 +9,22 @@ function computeStatus(raw: string, deadline: string): string {
   const now = new Date()
   if (now.getHours() * 60 + now.getMinutes() > h * 60 + m) return 'Overdue'
   return raw
+}
+
+function toScheduleFrequency(value: string | null | undefined): ScheduleFrequency {
+  switch (value) {
+    case 'Daily':
+    case 'Weekly':
+    case 'Fortnightly':
+    case 'Monthly':
+    case 'Quarterly':
+    case 'Six Monthly':
+    case 'Annually':
+    case 'Custom':
+      return value
+    default:
+      return 'Monthly'
+  }
 }
 
 async function getAssignedUserMaps(rows: Array<Record<string, unknown>>) {
@@ -62,9 +80,12 @@ function mapRow(
     assignedUser: fullNameByUsername.get(assignedUsername) ?? assignedUsername ?? 'Unassigned',
     status: computeStatus(row.status as string, row.inspection_deadline as string),
     inspectionDeadline: row.inspection_deadline as string,
+    inspectionFrequency: (row.inspection_frequency as string | null) ?? null,
     reminderDaysBeforeDue: (row.reminder_days_before_due as number) ?? 7,
     gracePeriod: (row.grace_period as number) ?? 3,
     autoGenerateInspection: (row.auto_generate_inspection as boolean) ?? true,
+    customIntervalValue: (row.custom_interval_value as number | null) ?? null,
+    customIntervalUnit: (row.custom_interval_unit as string | null) ?? null,
   }
 }
 
@@ -118,11 +139,14 @@ export async function GET(request: Request) {
   const machineName = url.searchParams.get('name')
   const assetId = url.searchParams.get('asset_id')
 
+  await runInspectionScheduler()
+
   let query = supabaseAdmin
     .from('machines')
     .select(
-      `id, name, area, assigned_user, status, inspection_deadline, code, 
-      reminder_days_before_due, grace_period, auto_generate_inspection,
+      `id, name, area, assigned_user, status, inspection_deadline, code,
+      inspection_frequency, reminder_days_before_due, grace_period, auto_generate_inspection,
+      custom_interval_value, custom_interval_unit,
       machine_inspection_templates!inner(template_id, inspection_frequency, active,
         checklist_templates!inner(name))`
     )
@@ -189,6 +213,8 @@ export async function POST(request: Request) {
     reminder_days_before_due?: number
     grace_period?: number
     auto_generate_inspection?: boolean
+    custom_interval_value?: number | null
+    custom_interval_unit?: string | null
   }
 
   if (!body.name?.trim()) {
@@ -211,9 +237,12 @@ export async function POST(request: Request) {
         assigned_user: assignment.username || null,
         status: 'Not Started',
         inspection_deadline: body.inspection_deadline ?? '09:00',
+        inspection_frequency: body.inspection_frequency ?? null,
         reminder_days_before_due: body.reminder_days_before_due ?? 7,
         grace_period: body.grace_period ?? 3,
         auto_generate_inspection: body.auto_generate_inspection ?? true,
+        custom_interval_value: body.custom_interval_value ?? null,
+        custom_interval_unit: body.custom_interval_unit ?? null,
       },
     ])
     .select('id')
@@ -227,7 +256,7 @@ export async function POST(request: Request) {
 
   // If a template is provided, create the assignment
   if (body.template_id?.trim()) {
-    const { error: assignmentError } = await supabaseAdmin
+    const { data: assignmentData, error: assignmentError } = await supabaseAdmin
       .from('machine_inspection_templates')
       .insert([
         {
@@ -237,12 +266,23 @@ export async function POST(request: Request) {
           active: true,
         },
       ])
+      .select('id, inspection_frequency')
+      .single()
 
     if (assignmentError) {
       // Delete the machine if assignment fails
       await supabaseAdmin.from('machines').delete().eq('id', machineId)
       return NextResponse.json({ error: assignmentError.message }, { status: 500 })
     }
+
+    await ensureScheduleForMachineTemplate({
+      machineTemplateId: assignmentData.id as string,
+      frequency: toScheduleFrequency(assignmentData.inspection_frequency as string | null),
+      intervalValue: 1,
+      customCron: null,
+      active: true,
+      nextDue: new Date(),
+    })
   }
 
   // Fetch the created machine with its template
@@ -250,7 +290,8 @@ export async function POST(request: Request) {
     .from('machines')
     .select(
       `id, name, area, assigned_user, status, inspection_deadline, code,
-      reminder_days_before_due, grace_period, auto_generate_inspection,
+      inspection_frequency, reminder_days_before_due, grace_period, auto_generate_inspection,
+      custom_interval_value, custom_interval_unit,
       machine_inspection_templates(template_id, inspection_frequency, active, checklist_templates(name))`
     )
     .eq('id', machineId)
@@ -296,6 +337,8 @@ export async function PATCH(request: Request) {
     reminder_days_before_due?: number
     grace_period?: number
     auto_generate_inspection?: boolean
+    custom_interval_value?: number | null
+    custom_interval_unit?: string | null
   }
 
   if (!body.id) {
@@ -308,9 +351,12 @@ export async function PATCH(request: Request) {
   if (body.status !== undefined) updates.status = body.status
   if (body.inspection_deadline !== undefined) updates.inspection_deadline = body.inspection_deadline
   if (body.asset_id !== undefined) updates.code = body.asset_id.trim() ? body.asset_id.trim() : null
+  if (body.inspection_frequency !== undefined) updates.inspection_frequency = body.inspection_frequency
   if (body.reminder_days_before_due !== undefined) updates.reminder_days_before_due = body.reminder_days_before_due
   if (body.grace_period !== undefined) updates.grace_period = body.grace_period
   if (body.auto_generate_inspection !== undefined) updates.auto_generate_inspection = body.auto_generate_inspection
+  if (body.custom_interval_value !== undefined) updates.custom_interval_value = body.custom_interval_value
+  if (body.custom_interval_unit !== undefined) updates.custom_interval_unit = body.custom_interval_unit
 
   // Update machine base fields
   const { error: updateError } = await supabaseAdmin.from('machines').update(updates).eq('id', body.id)
@@ -323,9 +369,23 @@ export async function PATCH(request: Request) {
   if (body.template_id !== undefined) {
     if (body.template_id?.trim()) {
       // Delete existing assignment and create new one
+      const { data: existingAssignments } = await supabaseAdmin
+        .from('machine_inspection_templates')
+        .select('id')
+        .eq('machine_id', body.id)
+
+      const existingAssignmentIds = (existingAssignments ?? []).map((row) => row.id as string)
+
+      if (existingAssignmentIds.length > 0) {
+        await supabaseAdmin
+          .from('inspection_schedules')
+          .delete()
+          .in('machine_template_id', existingAssignmentIds)
+      }
+
       await supabaseAdmin.from('machine_inspection_templates').delete().eq('machine_id', body.id)
 
-      const { error: assignmentError } = await supabaseAdmin
+      const { data: assignmentData, error: assignmentError } = await supabaseAdmin
         .from('machine_inspection_templates')
         .insert([
           {
@@ -335,12 +395,37 @@ export async function PATCH(request: Request) {
             active: true,
           },
         ])
+        .select('id, inspection_frequency')
+        .single()
 
       if (assignmentError) {
         return NextResponse.json({ error: assignmentError.message }, { status: 500 })
       }
+
+      await ensureScheduleForMachineTemplate({
+        machineTemplateId: assignmentData.id as string,
+        frequency: toScheduleFrequency(assignmentData.inspection_frequency as string | null),
+        intervalValue: 1,
+        customCron: null,
+        active: true,
+        nextDue: new Date(),
+      })
     } else {
       // Remove template assignment
+      const { data: existingAssignments } = await supabaseAdmin
+        .from('machine_inspection_templates')
+        .select('id')
+        .eq('machine_id', body.id)
+
+      const existingAssignmentIds = (existingAssignments ?? []).map((row) => row.id as string)
+
+      if (existingAssignmentIds.length > 0) {
+        await supabaseAdmin
+          .from('inspection_schedules')
+          .delete()
+          .in('machine_template_id', existingAssignmentIds)
+      }
+
       await supabaseAdmin.from('machine_inspection_templates').delete().eq('machine_id', body.id)
     }
   }
@@ -350,7 +435,8 @@ export async function PATCH(request: Request) {
     .from('machines')
     .select(
       `id, name, area, assigned_user, status, inspection_deadline, code,
-      reminder_days_before_due, grace_period, auto_generate_inspection,
+      inspection_frequency, reminder_days_before_due, grace_period, auto_generate_inspection,
+      custom_interval_value, custom_interval_unit,
       machine_inspection_templates(template_id, inspection_frequency, active, checklist_templates(name))`
     )
     .eq('id', body.id)

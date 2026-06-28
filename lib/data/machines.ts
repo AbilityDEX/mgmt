@@ -13,9 +13,12 @@ export interface Machine {
   assignedUser: string
   status: MachineStatus
   inspectionDeadline: string
+  inspectionFrequency?: InspectionFrequency | null
   reminderDaysBeforeDue?: number
   gracePeriod?: number
   autoGenerateInspection?: boolean
+  customIntervalValue?: number | null
+  customIntervalUnit?: 'Days' | 'Weeks' | 'Months' | null
 }
 
 export interface MachineTemplate {

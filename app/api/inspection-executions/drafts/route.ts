@@ -1,6 +1,25 @@
 import { NextResponse } from 'next/server'
 import { requireAuth, serverConfigErrorMessage, supabaseAdmin } from '@/lib/admin'
 
+type DraftInspectionMachine = {
+  id?: string
+  name?: string
+}
+
+type DraftInspectionRecord = {
+  id?: string
+  machine_id?: string
+  template_name?: string
+  started_at?: string
+  machines?: DraftInspectionMachine | DraftInspectionMachine[] | null
+}
+
+type DraftInspectionRow = {
+  last_saved_at?: string
+  progress_percent?: number
+  inspections?: DraftInspectionRecord | DraftInspectionRecord[] | null
+}
+
 /**
  * GET /api/inspection-executions/drafts
  * Get all incomplete inspections for the current user
@@ -41,10 +60,10 @@ export async function GET(request: Request) {
     }
 
     const drafts = (draftsData ?? []).map((draft) => {
-      const draftAsAny = draft as any
-      const inspection = Array.isArray(draftAsAny.inspections) 
-        ? draftAsAny.inspections[0] 
-        : draftAsAny.inspections
+      const draftRow = draft as DraftInspectionRow
+      const inspection = Array.isArray(draftRow.inspections)
+        ? draftRow.inspections[0]
+        : draftRow.inspections
       const machinesData = Array.isArray(inspection?.machines) 
         ? inspection.machines 
         : [inspection?.machines]
@@ -57,8 +76,8 @@ export async function GET(request: Request) {
         machineName: (machine?.name as string) || 'Unknown Machine',
         templateName: (inspection?.template_name as string) || 'Unknown Template',
         started: (inspection?.started_at as string) || '',
-        lastEdited: (draft.last_saved_at as string) || '',
-        progressPercent: Math.round((draft.progress_percent as number) || 0),
+        lastEdited: (draftRow.last_saved_at as string) || '',
+        progressPercent: Math.round((draftRow.progress_percent as number) || 0),
         remainingQuestions: 0, // Will be calculated after fetching items
         totalQuestions: 0,
       }

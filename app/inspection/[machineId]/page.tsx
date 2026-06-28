@@ -11,6 +11,9 @@ type AssignedTemplate = {
   templateName: string
   inspectionFrequency: string
   active: boolean
+  nextDue: string | null
+  isLocked: boolean
+  lockMessage: string | null
 }
 
 type InspectionHistoryEntry = {
@@ -105,7 +108,14 @@ export default function MachineInspectionPage() {
       }
 
       setMachine(payload.machine ?? null)
-      setAssignedTemplates(payload.assignedTemplates ?? [])
+      setAssignedTemplates(
+        (payload.assignedTemplates ?? []).map((template: AssignedTemplate) => ({
+          ...template,
+          nextDue: template.nextDue ?? null,
+          isLocked: Boolean(template.isLocked),
+          lockMessage: template.lockMessage ?? null,
+        }))
+      )
       setInspections(payload.inspections ?? [])
 
       if (!selectedTemplateId && payload.assignedTemplates?.length) {
@@ -152,10 +162,19 @@ export default function MachineInspectionPage() {
 
       const result = (await response.json()) as {
         error?: string
+        nextDue?: string | null
         inspection?: { id: string }
       }
 
       if (!response.ok || !result.inspection?.id) {
+        if (response.status === 409) {
+          await load()
+          const lockError = result.nextDue
+            ? `Next inspection available on ${formatDisplayDate(result.nextDue)}`
+            : result.error
+          setError(lockError || 'Failed to start inspection.')
+          return
+        }
         setError(result.error || 'Failed to start inspection.')
         return
       }
@@ -182,8 +201,12 @@ export default function MachineInspectionPage() {
   }
 
   const canStartWithSelection = useMemo(
-    () => Boolean(selectedTemplateId) && !starting,
-    [selectedTemplateId, starting]
+    () => {
+      if (!selectedTemplateId || starting) return false
+      const selected = assignedTemplates.find((template) => template.templateId === selectedTemplateId)
+      return Boolean(selected && !selected.isLocked)
+    },
+    [selectedTemplateId, starting, assignedTemplates]
   )
 
   const lastInspection = useMemo(
@@ -192,6 +215,11 @@ export default function MachineInspectionPage() {
   )
 
   const primaryTemplate = assignedTemplates[0] ?? null
+  const hasStartableTemplate = assignedTemplates.some((template) => !template.isLocked)
+  const allTemplatesLocked = assignedTemplates.length > 0 && !hasStartableTemplate
+  const lockMessage = allTemplatesLocked
+    ? primaryTemplate?.lockMessage ?? (primaryTemplate?.nextDue ? `Next inspection available on ${formatDisplayDate(primaryTemplate.nextDue)}` : null)
+    : null
 
   if (!currentUser) {
     return (
@@ -252,12 +280,16 @@ export default function MachineInspectionPage() {
             <button
               type="button"
               onClick={handleStartClick}
-              disabled={starting || isLoading || assignedTemplates.length === 0}
+              disabled={starting || isLoading || assignedTemplates.length === 0 || !hasStartableTemplate}
               className="rounded-3xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white shadow-[0_10px_25px_rgba(16,185,129,0.25)] transition hover:bg-emerald-500 disabled:opacity-60"
             >
-              {starting ? 'Starting...' : 'Start Inspection'}
+              {starting ? 'Starting...' : !hasStartableTemplate ? 'Locked' : 'Start Inspection'}
             </button>
           </div>
+
+          {allTemplatesLocked && lockMessage ? (
+            <p className="mb-4 text-sm text-amber-300">{lockMessage}</p>
+          ) : null}
 
           {isLoading ? (
             <div className="rounded-3xl bg-slate-950/80 px-4 py-6 text-sm text-slate-400">Loading inspection setup...</div>
@@ -267,6 +299,9 @@ export default function MachineInspectionPage() {
                 <div key={template.templateId} className="rounded-3xl bg-slate-950/80 p-4">
                   <p className="text-sm font-semibold text-white">{template.templateName}</p>
                   <p className="mt-1 text-xs text-slate-400">Frequency: {template.inspectionFrequency}</p>
+                  {template.isLocked && template.lockMessage ? (
+                    <p className="mt-2 text-xs text-amber-300">{template.lockMessage}</p>
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -359,12 +394,20 @@ export default function MachineInspectionPage() {
                 disabled={starting}
               >
                 {assignedTemplates.map((template) => (
-                  <option key={template.templateId} value={template.templateId}>
+                  <option key={template.templateId} value={template.templateId} disabled={template.isLocked}>
                     {template.templateName}
                   </option>
                 ))}
               </select>
             </label>
+
+            {selectedTemplateId ? (
+              (() => {
+                const selected = assignedTemplates.find((template) => template.templateId === selectedTemplateId)
+                if (!selected?.isLocked || !selected.lockMessage) return null
+                return <p className="mt-3 text-sm text-amber-300">{selected.lockMessage}</p>
+              })()
+            ) : null}
 
             <div className="mt-6 flex flex-wrap justify-end gap-3">
               <button

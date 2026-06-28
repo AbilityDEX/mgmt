@@ -19,6 +19,12 @@ type ArchiveLog = {
   retry_count: number
   failure_reason: string | null
   created_at: string
+  recipient: string | null
+  recipientCount: number
+  sent_time: string | null
+  machine_name: string | null
+  inspector: string | null
+  completed_at: string | null
 }
 
 export default function AdminArchiveLogsPage() {
@@ -122,6 +128,10 @@ export default function AdminArchiveLogsPage() {
                     <div>
                       <p className="text-sm font-semibold text-white">Inspection {log.inspection_id}</p>
                       <p className="mt-1 text-xs text-slate-400">{new Date(log.created_at).toLocaleString()}</p>
+                      {log.machine_name ? <p className="mt-1 text-xs text-slate-400">Machine: {log.machine_name}</p> : null}
+                      {log.inspector ? <p className="mt-1 text-xs text-slate-400">Inspector: {log.inspector}</p> : null}
+                      {log.recipient ? <p className="mt-1 text-xs text-slate-400">Recipient: {log.recipient} {log.recipientCount > 1 ? `(+${log.recipientCount - 1} more)` : ''}</p> : null}
+                      {log.sent_time ? <p className="mt-1 text-xs text-slate-400">Sent: {new Date(log.sent_time).toLocaleString()}</p> : null}
                       <p className="mt-1 text-xs text-slate-400">Retries: {log.retry_count}</p>
                       {log.failure_reason ? <p className="mt-1 text-xs text-rose-300">{log.failure_reason}</p> : null}
                     </div>

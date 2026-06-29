@@ -12,7 +12,31 @@ Runbook for operating the daily maintenance cron endpoint:
 - Route: /api/cron/daily-maintenance
 - Auth: Authorization header with Bearer token from CRON_SECRET
 - Runtime: Next.js Route Handler (nodejs)
-- Schedule source: vercel.json (currently every 30 minutes)
+- Schedule source: vercel.json (Vercel Hobby compatible single daily cron)
+
+## Schedule And Time Zone Behavior
+
+- Cron expression in vercel.json: 0 7 * * *
+- Vercel cron evaluation time zone: UTC
+- UTC execution time: 07:00 UTC daily
+- London winter time (GMT, UTC+0): 07:00 local
+- London summer time (BST, UTC+1): 08:00 local
+
+### Limitation (Vercel Hobby)
+
+Vercel Hobby supports one cron execution per day, and cron schedules are UTC-based.
+That means a single cron expression cannot stay fixed at exactly 07:00 Europe/London
+across both GMT and BST.
+
+Current implementation uses one daily invocation plus London-date idempotency in the
+maintenance service, so work executes at most once per London calendar day even if
+manual retries or duplicate requests occur.
+
+### If Strict 07:00 London Is Required Year-Round
+
+- Upgrade to a plan that supports more flexible scheduling.
+- Configure two UTC triggers (06:00 and 07:00 UTC) and keep the existing idempotent
+  daily guard so only one maintenance cycle runs for a London date.
 
 ## Secret Rotation
 
@@ -26,6 +50,7 @@ Runbook for operating the daily maintenance cron endpoint:
 
 1. Generate a new strong secret.
 2. In Vercel Project Settings -> Environment Variables, set CRON_SECRET to the new value for Production (and Preview if used).
+  Vercel Cron will send Authorization: Bearer <CRON_SECRET> automatically when invoking the endpoint.
 3. Redeploy production so the new environment value is active.
 4. Trigger one authorized request to validate the new secret:
 

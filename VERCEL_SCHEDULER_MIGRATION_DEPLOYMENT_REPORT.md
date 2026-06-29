@@ -38,7 +38,12 @@ Migrated scheduler execution from in-process background timers to explicit invoc
 
 - vercel.json
   - Cron job configured for /api/cron/daily-maintenance
-  - Schedule: */30 * * * *
+  - Schedule: 0 7 * * *
+  - Time base: UTC (Vercel cron)
+  - London mapping:
+    - Winter (GMT): 07:00 local
+    - Summer (BST): 08:00 local
+  - Hobby limitation: one static UTC schedule cannot remain exactly 07:00 Europe/London across DST boundaries
 
 ## Environment Variables
 
@@ -141,4 +146,4 @@ No maintenance business logic was duplicated.
 
 1. Repository still has high warning volume; lint passes but warning debt should be reduced over time.
 2. CRON_SECRET must be set in production; if missing, production cron route rejects execution.
-3. Vercel cron schedule is fixed at 30 minutes in vercel.json; changing cadence requires a config update and redeploy.
+3. Vercel Hobby cron is UTC-based and single-frequency; exact 07:00 Europe/London year-round is not possible with one daily trigger.

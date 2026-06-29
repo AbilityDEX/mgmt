@@ -1,5 +1,4 @@
 export function register() {
-  if (process.env.NEXT_RUNTIME === 'nodejs') {
-    return require('./register.node')
-  }
+  // Node startup side effects were intentionally removed for serverless cron execution.
+  return
 }

@@ -14,7 +14,7 @@
  * 7. Existing functionality is unchanged
  */
 
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { dailyMaintenance } from '@/lib/services/dailyMaintenance';
 import { getLondonDateKey } from '@/lib/inspectionTime';
 
@@ -44,7 +44,7 @@ function assert(condition: boolean, message: string) {
 }
 
 // Test 1: Verify daily maintenance log table exists
-async function test_maintenanceLogTableExists(supabase: any) {
+async function test_maintenanceLogTableExists(supabase: SupabaseClient) {
   const start = Date.now();
   try {
     const { data, error } = await supabase
@@ -73,7 +73,7 @@ async function test_maintenanceLogTableExists(supabase: any) {
 }
 
 // Test 2: Verify daily maintenance runs exactly once per day
-async function test_dailyMaintenanceIdempotency(supabase: any) {
+async function test_dailyMaintenanceIdempotency(supabase: SupabaseClient) {
   const start = Date.now();
   try {
     const londonDate = getLondonDateKey(new Date());
@@ -114,6 +114,8 @@ async function test_dailyMaintenanceIdempotency(supabase: any) {
 
     const afterSecondCount = afterSecondData?.length ?? 0;
 
+    const expectedAfterFirstCount = beforeCount === 0 ? 1 : beforeCount;
+
     // Verify exactly one completion per day
     assert(
       result1.success,
@@ -124,8 +126,8 @@ async function test_dailyMaintenanceIdempotency(supabase: any) {
       'Second run should be skipped (idempotent)'
     );
     assert(
-      afterFirstCount === beforeCount + 1,
-      `Should have exactly one completion after first run (before: ${beforeCount}, after: ${afterFirstCount})`
+      afterFirstCount === expectedAfterFirstCount,
+      `Unexpected completion count after first run (before: ${beforeCount}, after: ${afterFirstCount}, expected: ${expectedAfterFirstCount})`
     );
     assert(
       afterSecondCount === afterFirstCount,
@@ -158,7 +160,7 @@ async function test_dailyMaintenanceIdempotency(supabase: any) {
 }
 
 // Test 3: Verify maintenance completion detection works
-async function test_hasMaintenanceCompletedDetection(supabase: any) {
+async function test_hasMaintenanceCompletedDetection(supabase: SupabaseClient) {
   const start = Date.now();
   try {
     const londonDate = getLondonDateKey(new Date());
@@ -201,7 +203,7 @@ async function test_hasMaintenanceCompletedDetection(supabase: any) {
 }
 
 // Test 4: Verify maintenance statistics are captured
-async function test_maintenanceStatisticsCapture(supabase: any) {
+async function test_maintenanceStatisticsCapture(supabase: SupabaseClient) {
   const start = Date.now();
   try {
     const result = await dailyMaintenance.runDailyMaintenance(supabase, 'test-stats');
@@ -242,17 +244,18 @@ async function test_maintenanceStatisticsCapture(supabase: any) {
 }
 
 // Test 5: Verify scheduler lease mechanism
-async function test_schedulerLeaseMechanism(supabase: any) {
+async function test_schedulerLeaseMechanism(supabase: SupabaseClient) {
   const start = Date.now();
   try {
     const owner1 = `test-lease-${Date.now()}-1`;
     const owner2 = `test-lease-${Date.now()}-2`;
+    const leaseName = `test-lease-verification-${Date.now()}`;
 
     // First owner acquires lease
     const { data: leaseData1, error: leaseError1 } = await supabase.rpc(
       'try_acquire_scheduler_lock',
       {
-        p_name: 'test-lease-verification',
+        p_name: leaseName,
         p_owner: owner1,
         p_lease_seconds: 300,
       }
@@ -265,7 +268,7 @@ async function test_schedulerLeaseMechanism(supabase: any) {
     const { data: leaseData2, error: leaseError2 } = await supabase.rpc(
       'try_acquire_scheduler_lock',
       {
-        p_name: 'test-lease-verification',
+        p_name: leaseName,
         p_owner: owner2,
         p_lease_seconds: 300,
       }
@@ -278,7 +281,7 @@ async function test_schedulerLeaseMechanism(supabase: any) {
     const { data: leaseData3, error: leaseError3 } = await supabase.rpc(
       'try_acquire_scheduler_lock',
       {
-        p_name: 'test-lease-verification',
+        p_name: leaseName,
         p_owner: owner1,
         p_lease_seconds: 300,
       }
@@ -289,7 +292,7 @@ async function test_schedulerLeaseMechanism(supabase: any) {
 
     // Release lease
     const { error: releaseError } = await supabase.rpc('release_scheduler_lock', {
-      p_name: 'test-lease-verification',
+      p_name: leaseName,
       p_owner: owner1,
     });
 
@@ -299,7 +302,7 @@ async function test_schedulerLeaseMechanism(supabase: any) {
     const { data: leaseData4, error: leaseError4 } = await supabase.rpc(
       'try_acquire_scheduler_lock',
       {
-        p_name: 'test-lease-verification',
+        p_name: leaseName,
         p_owner: owner2,
         p_lease_seconds: 300,
       }

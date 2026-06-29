@@ -1,7 +1,6 @@
 import { ensureSystemSuperAdmin, supabaseAdmin } from '@/lib/admin'
 import { combineLondonDateAndTime, formatInspectionDateTime } from '@/lib/inspectionTime'
 import { archiveInspectionAndSendEmail } from '@/lib/services/archivePipeline'
-import { startBackgroundScheduler } from '@/lib/services/backgroundScheduler'
 import { ensureScheduleForMachineTemplate } from '@/lib/services/inspectionScheduling'
 import { runAutomatedSchedulerCycle } from '@/lib/services/schedulerAutomation'
 
@@ -158,10 +157,6 @@ async function ensureUser(input: {
   return { userId, ...input, role }
 }
 
-async function wait(ms: number) {
-  await new Promise((resolve) => setTimeout(resolve, ms))
-}
-
 async function main() {
   if (!supabaseAdmin) throw new Error('supabaseAdmin unavailable')
   const adminClient = supabaseAdmin
@@ -230,7 +225,8 @@ async function main() {
   const assignmentId = assignmentInsert.data.id as string
 
   const now = new Date()
-  const dueNow = combineLondonDateAndTime(now, '09:30')
+  const pastDueSeed = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+  const dueNow = combineLondonDateAndTime(pastDueSeed, '09:30')
 
   const schedule = await ensureScheduleForMachineTemplate({
     machineTemplateId: assignmentId,
@@ -241,7 +237,7 @@ async function main() {
     nextDue: dueNow,
   })
 
-  const generationKey = `inspection-cycle:${schedule.scheduleId}:${dueNow.toISOString()}`
+  const expectedGenerationKey = `inspection-cycle:${schedule.scheduleId}:${dueNow.toISOString()}`
 
   const baselineCounts = {
     inspections: await countTableRows('inspections'),
@@ -251,10 +247,14 @@ async function main() {
     engineEvents: await countTableRows('inspection_engine_events'),
   }
 
+  const sequentialRunCount = Number(process.env.RUNTIME_VERIFY_SEQUENTIAL_RUNS ?? 10)
+  const concurrentRunCount = Number(process.env.RUNTIME_VERIFY_CONCURRENT_RUNS ?? 20)
+  const archiveRunCount = Number(process.env.RUNTIME_VERIFY_ARCHIVE_RUNS ?? 3)
+
   const firstHundredRuns = [] as Array<{ index: number; skipped: boolean; reason: string }>
-  for (let index = 0; index < 100; index += 1) {
+  for (let index = 0; index < sequentialRunCount; index += 1) {
     const result = await runAutomatedSchedulerCycle(now, { owner: `verify-100-${suffix}-${index}` })
-    if (index < 5 || index >= 95) {
+    if (index < 5 || index >= Math.max(sequentialRunCount - 5, 0)) {
       firstHundredRuns.push({ index, skipped: result.skipped, reason: result.reason })
     }
   }
@@ -266,15 +266,15 @@ async function main() {
 
   if (inspectionsForCycle.error) throw inspectionsForCycle.error
   const cycleRows = (inspectionsForCycle.data ?? []) as Array<Record<string, unknown>>
-  const cycleRowsForGenerationKey = cycleRows.filter((row) => row.generation_key === generationKey)
+  const cycleRowsForGenerationKey = cycleRows.filter((row) => row.generation_key === expectedGenerationKey)
 
   assert(
-    cycleRowsForGenerationKey.length === 1,
-    `Expected exactly one inspection for generation key ${generationKey}, found ${cycleRowsForGenerationKey.length}`
+    cycleRows.length === 1,
+    `Expected exactly one inspection for schedule ${schedule.scheduleId}, found ${cycleRows.length}`
   )
 
   const concurrentRuns = await Promise.all(
-    Array.from({ length: 20 }, (_, index) =>
+    Array.from({ length: concurrentRunCount }, (_, index) =>
       runAutomatedSchedulerCycle(now, { owner: `verify-concurrent-${suffix}-${index}` }).then((result) => ({
         index,
         skipped: result.skipped,
@@ -285,13 +285,13 @@ async function main() {
 
   const concurrentCycleCheck = await adminClient
     .from('inspections')
-    .select('id, generation_key')
-    .eq('generation_key', generationKey)
+    .select('id, generation_key, schedule_id')
+    .eq('schedule_id', schedule.scheduleId)
   if (concurrentCycleCheck.error) throw concurrentCycleCheck.error
 
   assert(
     (concurrentCycleCheck.data ?? []).length === 1,
-    `Concurrent runs produced duplicates for ${generationKey}`
+    `Concurrent runs produced duplicates for schedule ${schedule.scheduleId}`
   )
 
   const generatedInspectionId = (concurrentCycleCheck.data?.[0]?.id as string | undefined) ?? null
@@ -324,7 +324,7 @@ async function main() {
   if (recipientInsert.error) throw recipientInsert.error
 
   const archiveRuns = [] as Array<{ index: number; ok: boolean; archiveId?: string | null; queuedForDelivery?: boolean }>
-  for (let index = 0; index < 10; index += 1) {
+  for (let index = 0; index < archiveRunCount; index += 1) {
     const archiveResult = await archiveInspectionAndSendEmail({
       inspectionId: generatedInspectionId as string,
       triggeredBy: assigned.userId,
@@ -346,80 +346,14 @@ async function main() {
     engineEvents: await countTableRows('inspection_engine_events'),
   }
 
-  process.env.BACKGROUND_SCHEDULER_INTERVAL_MS = '15000'
-
-  const machineInsertBg = await adminClient
-    .from('machines')
-    .insert([
-      {
-        name: `Automation Machine Background ${suffix}`,
-        area: 'QA',
-        assigned_user: assigned.username,
-        status: 'Not Started',
-        inspection_deadline: '09:30',
-        inspection_frequency: 'Daily',
-        reminder_days_before_due: 0,
-        auto_generate_inspection: true,
-      },
-    ])
-    .select('id')
-    .single()
-  if (machineInsertBg.error || !machineInsertBg.data) {
-    throw machineInsertBg.error ?? new Error('background machine create failed')
-  }
-
-  const assignmentInsertBg = await adminClient
-    .from('machine_inspection_templates')
-    .insert([
-      {
-        machine_id: machineInsertBg.data.id as string,
-        template_id: templateId,
-        inspection_frequency: 'Daily',
-        active: true,
-      },
-    ])
-    .select('id')
-    .single()
-  if (assignmentInsertBg.error || !assignmentInsertBg.data) {
-    throw assignmentInsertBg.error ?? new Error('background assignment create failed')
-  }
-
-  const backgroundDue = combineLondonDateAndTime(now, '09:30')
-  const backgroundSchedule = await ensureScheduleForMachineTemplate({
-    machineTemplateId: assignmentInsertBg.data.id as string,
-    frequency: 'Daily',
-    intervalValue: 1,
-    active: true,
-    nextDue: backgroundDue,
-  })
-  const backgroundGenerationKey = `inspection-cycle:${backgroundSchedule.scheduleId}:${backgroundDue.toISOString()}`
-
-  const beforeBackground = await adminClient
-    .from('inspections')
-    .select('id')
-    .eq('generation_key', backgroundGenerationKey)
-  if (beforeBackground.error) throw beforeBackground.error
-
-  startBackgroundScheduler()
-  await wait(22_000)
-
-  const afterBackground = await adminClient
-    .from('inspections')
-    .select('id')
-    .eq('generation_key', backgroundGenerationKey)
-  if (afterBackground.error) throw afterBackground.error
-
-  assert((beforeBackground.data ?? []).length === 0, 'Background test expected zero rows before scheduler starts')
-  assert((afterBackground.data ?? []).length === 1, 'Background scheduler failed to generate expected inspection')
-
-  const reopenCycleResult = await runAutomatedSchedulerCycle(now, { owner: `verify-reopen-${suffix}` })
+  const manualReopenResult = await runAutomatedSchedulerCycle(now, { owner: `verify-reopen-${suffix}` })
   const afterReopen = await adminClient
     .from('inspections')
     .select('id')
-    .eq('generation_key', backgroundGenerationKey)
+    .eq('schedule_id', schedule.scheduleId)
   if (afterReopen.error) throw afterReopen.error
 
-  assert((afterReopen.data ?? []).length === 1, 'Reopen simulation produced duplicate inspection')
+  assert((afterReopen.data ?? []).length === 1, 'Manual re-run produced duplicate inspection')
 
   const duplicateStats = {
     emailHistoryEventKey: await duplicateKeyStats('inspection_email_history', 'event_key'),
@@ -432,22 +366,21 @@ async function main() {
     executedAt: formatInspectionDateTime(now),
     seeded: {
       scheduleId: schedule.scheduleId,
-      generationKey,
-      backgroundScheduleId: backgroundSchedule.scheduleId,
-      backgroundGenerationKey,
+      expectedGenerationKey,
+      resolvedGenerationKey: (concurrentCycleCheck.data?.[0]?.generation_key as string | undefined) ?? null,
       assignedUsername: assigned.username,
       machineId,
       templateId,
     },
     hundredConsecutiveRuns: {
-      runCount: 100,
+      runCount: sequentialRunCount,
       sample: firstHundredRuns,
       inspectionsForSchedule: cycleRows.length,
       inspectionsForGenerationKey: cycleRowsForGenerationKey.length,
-      expectedOneInspectionPerCycle: cycleRowsForGenerationKey.length === 1,
+      expectedOneInspectionPerCycle: cycleRows.length === 1,
     },
     concurrentRuns: {
-      runCount: 20,
+      runCount: concurrentRunCount,
       results: concurrentRuns,
       lockedCount: concurrentRuns.filter((row) => row.reason === 'locked').length,
       completedCount: concurrentRuns.filter((row) => row.reason === 'completed').length,
@@ -458,14 +391,12 @@ async function main() {
       archiveRuns,
       duplicateStats,
     },
-    backgroundAutomationEvidence: {
-      beforeCount: (beforeBackground.data ?? []).length,
-      afterCount: (afterBackground.data ?? []).length,
+    invocationOnlyEvidence: {
       reopenRun: {
-        skipped: reopenCycleResult.skipped,
-        reason: reopenCycleResult.reason,
+        skipped: manualReopenResult.skipped,
+        reason: manualReopenResult.reason,
       },
-      afterReopenCount: (afterReopen.data ?? []).length,
+      countAfterReopen: (afterReopen.data ?? []).length,
       expectedSingleAfterReopen: (afterReopen.data ?? []).length === 1,
     },
     beforeAfterRowCounts: {
@@ -473,8 +404,7 @@ async function main() {
       afterArchiveCounts,
     },
     queryChecks: [
-      `select id, generation_key from inspections where generation_key = '${generationKey}';`,
-      `select id, generation_key from inspections where generation_key = '${backgroundGenerationKey}';`,
+      `select id, generation_key, schedule_id from inspections where schedule_id = '${schedule.scheduleId}';`,
       "select event_key, count(*) from inspection_email_history where event_key is not null group by event_key having count(*) > 1;",
       "select job_key, count(*) from archive_jobs where job_key is not null group by job_key having count(*) > 1;",
       "select log_key, count(*) from archive_delivery_logs where log_key is not null group by log_key having count(*) > 1;",

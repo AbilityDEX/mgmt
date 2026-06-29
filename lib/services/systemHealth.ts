@@ -831,7 +831,7 @@ async function buildFrequencyValidation(): Promise<FrequencyValidation[]> {
 async function buildPdfValidation(): Promise<PdfValidation> {
   if (!supabaseAdmin) throw new Error(serverConfigErrorMessage)
 
-  let latest = await supabaseAdmin
+  const latest = await supabaseAdmin
     .from('inspection_archives')
     .select('pdf_base64,file_name,inspection_id')
     .not('file_name', 'ilike', '%-repair.pdf')

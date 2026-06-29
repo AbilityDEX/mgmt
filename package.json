@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "cron:daily-maintenance": "node scripts/trigger-daily-maintenance.mjs",
     "db:link": "supabase link",
     "db:push": "supabase db push",
     "db:reset": "supabase db reset"

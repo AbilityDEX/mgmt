@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { formatInspectionDateTime } from '@/lib/inspectionTime'
 import { supabaseClient } from '@/lib/supabase'
 
 type HealthCard = {
@@ -29,10 +30,30 @@ type HealthResponse = {
     checks: {
       nextDueCalculation: boolean
       reminderCalculation: boolean
-      gracePeriodCalculation: boolean
-      midnightTransition: boolean
+      ukTimePreserved: boolean
       lockUnlockBehaviour: boolean
     }
+  }>
+  schedulerDiagnostics: Array<{
+    scheduleId: string
+    machineId: string
+    machineName: string
+    templateName: string
+    currentTime: string
+    inspectionTime: string
+    currentStatus: string
+    dueSoonTime: string | null
+    dueTime: string
+    overdueTime: string
+    lockUntil: string
+    reminderQueued: boolean
+    reminderSent: boolean
+    nextReminderTime: string | null
+    recipientCount: number
+    recipientSource: string
+    schedulerDecision: string
+    apiDecision: string
+    dbDecision: string
   }>
   pdfValidation: {
     status: 'PASS' | 'WARNING' | 'FAILED'
@@ -240,7 +261,7 @@ export default function AdminSystemHealthPage() {
               Refresh Status
             </button>
           </div>
-          {result ? <p className="mt-3 text-xs text-slate-400">Generated at {new Date(result.generatedAt).toLocaleString()}</p> : null}
+          {result ? <p className="mt-3 text-xs text-slate-400">Generated at {formatInspectionDateTime(result.generatedAt)}</p> : null}
         </section>
 
         {isLoading ? (
@@ -338,6 +359,41 @@ export default function AdminSystemHealthPage() {
                     </div>
                   </article>
                 ))}
+              </div>
+            </section>
+
+            <section className="mb-6 rounded-[28px] bg-slate-900/90 p-5 shadow-[0_18px_40px_rgba(0,0,0,0.22)]">
+              <h2 className="text-lg font-semibold text-white">Scheduler Diagnostics</h2>
+              <div className="mt-3 space-y-2">
+                {result.schedulerDiagnostics.length > 0 ? (
+                  result.schedulerDiagnostics.map((item) => (
+                    <article key={item.scheduleId} className="rounded-2xl bg-slate-950/80 px-4 py-3 text-sm">
+                      <div className="flex items-center justify-between gap-3">
+                        <h3 className="font-medium text-slate-100">{item.machineName} · {item.templateName}</h3>
+                        <span className="text-xs text-slate-400">{item.scheduleId}</span>
+                      </div>
+                      <div className="mt-2 grid gap-2 md:grid-cols-2">
+                        <p className="text-xs text-slate-400">currentTime: <span className="text-slate-200">{item.currentTime}</span></p>
+                        <p className="text-xs text-slate-400">inspectionTime: <span className="text-slate-200">{item.inspectionTime}</span></p>
+                        <p className="text-xs text-slate-400">currentStatus: <span className="text-slate-200">{item.currentStatus}</span></p>
+                        <p className="text-xs text-slate-400">dueSoonTime: <span className="text-slate-200">{item.dueSoonTime ?? 'N/A'}</span></p>
+                        <p className="text-xs text-slate-400">dueTime: <span className="text-slate-200">{item.dueTime}</span></p>
+                        <p className="text-xs text-slate-400">overdueTime: <span className="text-slate-200">{item.overdueTime}</span></p>
+                        <p className="text-xs text-slate-400">lockUntil: <span className="text-slate-200">{item.lockUntil}</span></p>
+                        <p className="text-xs text-slate-400">nextReminderTime: <span className="text-slate-200">{item.nextReminderTime ?? 'N/A'}</span></p>
+                        <p className="text-xs text-slate-400">reminderQueued: <span className={item.reminderQueued ? 'text-emerald-300' : 'text-slate-300'}>{String(item.reminderQueued)}</span></p>
+                        <p className="text-xs text-slate-400">reminderSent: <span className={item.reminderSent ? 'text-emerald-300' : 'text-slate-300'}>{String(item.reminderSent)}</span></p>
+                        <p className="text-xs text-slate-400">recipientCount: <span className="text-slate-200">{item.recipientCount}</span></p>
+                        <p className="text-xs text-slate-400">recipientSource: <span className="text-slate-200">{item.recipientSource}</span></p>
+                        <p className="text-xs text-slate-400">schedulerDecision: <span className="text-slate-200">{item.schedulerDecision}</span></p>
+                        <p className="text-xs text-slate-400">apiDecision: <span className="text-slate-200">{item.apiDecision}</span></p>
+                        <p className="text-xs text-slate-400">dbDecision: <span className="text-slate-200">{item.dbDecision}</span></p>
+                      </div>
+                    </article>
+                  ))
+                ) : (
+                  <p className="text-sm text-slate-400">No scheduler diagnostics available.</p>
+                )}
               </div>
             </section>
 

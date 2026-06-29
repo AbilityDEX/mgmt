@@ -21,6 +21,8 @@ const statusVariant: Record<MachineStatus, 'success' | 'danger' | 'warning' | 'n
   Completed: 'success',
   Overdue: 'danger',
   'In Progress': 'warning',
+  Due: 'danger',
+  'Due Soon': 'warning',
 }
 
 function actionClasses(variant: ButtonAction['variant']) {
@@ -84,12 +86,6 @@ export default function MachineCard({ machine, titleHref, primaryAction, seconda
             <>
               <p className="mt-3 text-sm text-slate-400">Reminder</p>
               <p className="text-sm text-slate-200">{machine.reminderDaysBeforeDue} days before due</p>
-            </>
-          ) : null}
-          {machine.gracePeriod !== undefined ? (
-            <>
-              <p className="mt-3 text-sm text-slate-400">Grace Period</p>
-              <p className="text-sm text-slate-200">{machine.gracePeriod} days</p>
             </>
           ) : null}
         </div>

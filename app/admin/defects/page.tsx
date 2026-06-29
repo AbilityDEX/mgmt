@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { formatInspectionDateTime } from '@/lib/inspectionTime'
 import { supabaseClient } from '@/lib/supabase'
 
 type DefectSeverity = 'Low' | 'Medium' | 'High' | 'Critical'
@@ -45,8 +46,7 @@ async function getToken(): Promise<string | null> {
 }
 
 function formatDate(value: string) {
-  const parsed = new Date(value)
-  return Number.isNaN(parsed.getTime()) ? 'N/A' : parsed.toLocaleString()
+  return formatInspectionDateTime(value)
 }
 
 export default function AdminDefectsPage() {

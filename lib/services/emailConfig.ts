@@ -1,6 +1,6 @@
 import type { CompanySettings } from '@/lib/types/release1'
 
-const DEFAULT_ARCHIVE_MAILBOX = 'mgmtinspect@gmail.com'
+const DEFAULT_ARCHIVE_MAILBOX = 'admin@mgmt.local'
 
 export type EmailTransportConfig = {
   fromName: string
@@ -20,8 +20,7 @@ export function applySubjectPrefix(subject: string) {
 }
 
 export function resolveArchiveMailbox(company: Pick<CompanySettings, 'email'> & { archiveEmail?: string | null }) {
-  void company
-  return DEFAULT_ARCHIVE_MAILBOX
+  return (company.archiveEmail ?? company.email ?? '').trim() || DEFAULT_ARCHIVE_MAILBOX
 }
 
 export function resolveCompanyName(company: Pick<CompanySettings, 'companyName'> | null | undefined) {

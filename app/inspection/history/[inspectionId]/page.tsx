@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
+import { formatInspectionDateTime } from '@/lib/inspectionTime'
 import { supabaseClient } from '@/lib/supabase'
 import type { InspectionItem, Inspection } from '@/lib/data/inspections'
 
@@ -104,7 +105,7 @@ export default function InspectionHistoryPage() {
               <div className="print:text-sm print:text-slate-900 rounded-2xl bg-slate-800 px-3 py-2 text-xs sm:text-sm">
                 <span className="print:text-slate-600 text-slate-400">Started:</span>
                 <span className="ml-1 font-semibold text-slate-100 print:text-slate-900">
-                  {new Date(inspection.startedAt).toLocaleString()}
+                  {formatInspectionDateTime(inspection.startedAt)}
                 </span>
               </div>
             )}
@@ -112,7 +113,7 @@ export default function InspectionHistoryPage() {
               <div className="print:text-sm print:text-slate-900 rounded-2xl bg-slate-800 px-3 py-2 text-xs sm:text-sm">
                 <span className="print:text-slate-600 text-slate-400">Completed:</span>
                 <span className="ml-1 font-semibold text-slate-100 print:text-slate-900">
-                  {new Date(inspection.completedAt).toLocaleString()}
+                  {formatInspectionDateTime(inspection.completedAt)}
                 </span>
               </div>
             )}
@@ -220,7 +221,7 @@ export default function InspectionHistoryPage() {
                         {item.signature && (
                           <div className="mt-2">
                             <p className="print:text-slate-700 text-xs font-semibold text-slate-400">
-                              ✍️ Signature captured on {new Date(item.signature.timestamp).toLocaleString()}
+                              ✍️ Signature captured on {formatInspectionDateTime(item.signature.timestamp)}
                             </p>
                           </div>
                         )}
@@ -233,7 +234,7 @@ export default function InspectionHistoryPage() {
 
             {/* Print footer */}
             <div className="print:mt-6 print:border-t print:border-slate-300 print:pt-4 print:text-center print:text-xs print:text-slate-600">
-              <p>This inspection record was generated on {new Date().toLocaleString()}</p>
+              <p>This inspection record was generated on {formatInspectionDateTime(new Date())}</p>
               <p className="print:mt-1">MGMT Inspect - Machine Inspection System</p>
             </div>
           </>

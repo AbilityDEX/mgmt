@@ -28,6 +28,11 @@ export async function PATCH(request: Request) {
     reportFooter?: string | null
     reportPrimaryColor?: string
     reportAccentColor?: string
+    dailyReminderSendTime?: string | null
+    dueSoonWarningDays?: number | null
+    enableDueSoon?: boolean | null
+    enableEmployeeReminderEmails?: boolean | null
+    enableManagementOverdueNotifications?: boolean | null
   }
 
   try {

@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import { formatInspectionDateTime } from '@/lib/inspectionTime'
 import { supabaseClient } from '@/lib/supabase'
 
 type VerificationResult = {
@@ -72,7 +73,7 @@ export default function AdminRuntimeVerificationPage() {
               <p className={`text-sm font-semibold ${result.ok ? 'text-emerald-300' : 'text-rose-300'}`}>
                 {result.ok ? 'All checks passed.' : 'Some checks failed.'}
               </p>
-              <p className="mt-1 text-xs text-slate-400">Generated at {new Date(result.generatedAt).toLocaleString()}</p>
+              <p className="mt-1 text-xs text-slate-400">Generated at {formatInspectionDateTime(result.generatedAt)}</p>
               <div className="mt-3 space-y-2">
                 {result.checks.map((check) => (
                   <article key={check.name} className="rounded-2xl bg-slate-950/80 px-4 py-3 text-sm">

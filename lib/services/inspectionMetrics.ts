@@ -7,6 +7,8 @@ type EventType =
   | 'completion_success'
   | 'cancelled'
   | 'lock_denial'
+  | 'generated_cycle'
+  | 'overdue_notification_sent'
 
 export async function trackInspectionEvent(input: {
   eventType: EventType
@@ -15,10 +17,11 @@ export async function trackInspectionEvent(input: {
   scheduleId?: string | null
   userId?: string | null
   details?: Record<string, unknown>
+  eventKey?: string | null
 }) {
   if (!supabaseAdmin) throw new Error(serverConfigErrorMessage)
 
-  await supabaseAdmin.from('inspection_engine_events').insert([
+  const { error } = await supabaseAdmin.from('inspection_engine_events').insert([
     {
       event_type: input.eventType,
       inspection_id: input.inspectionId ?? null,
@@ -26,8 +29,16 @@ export async function trackInspectionEvent(input: {
       schedule_id: input.scheduleId ?? null,
       user_id: input.userId ?? null,
       details: input.details ?? {},
+      event_key: input.eventKey ?? null,
     },
   ])
+
+  if (error) {
+    if ('code' in error && error.code === '23505' && input.eventKey) {
+      return
+    }
+    throw error
+  }
 }
 
 export async function getInspectionEngineMetrics() {

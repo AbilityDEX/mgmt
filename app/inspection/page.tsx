@@ -20,7 +20,7 @@ export default function InspectionPage() {
       const token = sessionData.session?.access_token
       if (!token) return
 
-      const isAdmin = ['Admin', 'admin', 'super_admin'].includes(currentUser.name ?? '')
+      const isAdmin = ['admin', 'super_admin'].includes((currentUser.role ?? '').toLowerCase())
       const url = isAdmin
         ? '/api/machines'
         : `/api/machines?assigned_to=${encodeURIComponent(currentUser.id ?? '')}`

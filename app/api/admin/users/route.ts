@@ -16,6 +16,7 @@ type NewUserPayload = {
   role: string
   work_area: string
   phone: string
+  receive_inspection_reminder_emails?: boolean
 }
 
 type UpdateUserPayload = {
@@ -27,6 +28,7 @@ type UpdateUserPayload = {
   work_area: string
   phone: string
   active: boolean
+  receive_inspection_reminder_emails?: boolean
   password?: string
 }
 
@@ -39,6 +41,7 @@ type ProfileRow = {
   work_area: string | null
   phone: string | null
   active: boolean | null
+  receive_inspection_reminder_emails: boolean | null
 }
 
 function normalizeRole(role: string) {
@@ -68,7 +71,7 @@ async function fetchUsers() {
 
   const { data, error } = await supabaseAdmin
     .from('profiles')
-    .select('user_id, username, full_name, email, role, work_area, phone, active')
+    .select('user_id, username, full_name, email, role, work_area, phone, active, receive_inspection_reminder_emails')
     .order('full_name', { ascending: true })
 
   if (error) {
@@ -84,6 +87,7 @@ async function fetchUsers() {
     workArea: profile.work_area ?? '',
     phone: profile.phone ?? '',
     active: profile.active ?? false,
+    receiveInspectionReminderEmails: Boolean(profile.receive_inspection_reminder_emails),
   }))
 }
 
@@ -119,6 +123,7 @@ export async function POST(request: Request) {
     const password = payload.password?.trim() || ''
     const requestedRole = payload.role?.trim().toLowerCase() || 'operator'
     const role = normalizeRole(payload.role || 'operator')
+    const receiveInspectionReminderEmails = Boolean(payload.receive_inspection_reminder_emails)
 
     if (!username || !fullName || !email || !password) {
       return NextResponse.json({ error: 'Username, full name, email, and password are required' }, { status: 400 })
@@ -161,6 +166,7 @@ export async function POST(request: Request) {
         work_area: payload.work_area,
         phone: payload.phone,
         active: true,
+        receive_inspection_reminder_emails: receiveInspectionReminderEmails,
       },
     ])
     // users table is an application-level mirror; non-fatal if it fails
@@ -178,6 +184,7 @@ export async function POST(request: Request) {
         work_area: payload.work_area,
         phone: payload.phone,
         active: true,
+        receive_inspection_reminder_emails: receiveInspectionReminderEmails,
       },
     ])
 
@@ -196,6 +203,7 @@ export async function POST(request: Request) {
         workArea: payload.work_area || '',
         phone: payload.phone || '',
         active: true,
+        receiveInspectionReminderEmails,
       },
     })
   } catch (error) {
@@ -220,6 +228,7 @@ export async function PATCH(request: Request) {
     const email = payload.email?.trim().toLowerCase() || ''
     const requestedRole = payload.role?.trim().toLowerCase() || 'operator'
     const role = normalizeRole(payload.role || 'operator')
+    const receiveInspectionReminderEmails = Boolean(payload.receive_inspection_reminder_emails)
 
     if (!payload.user_id || !username || !fullName || !email) {
       return NextResponse.json({ error: 'User id, username, name, and email are required' }, { status: 400 })
@@ -265,6 +274,7 @@ export async function PATCH(request: Request) {
         work_area: payload.work_area,
         phone: payload.phone,
         active: payload.active,
+        receive_inspection_reminder_emails: receiveInspectionReminderEmails,
       })
       .eq('id', payload.user_id)
     if (updateUserError) {
@@ -281,6 +291,7 @@ export async function PATCH(request: Request) {
         work_area: payload.work_area,
         phone: payload.phone,
         active: payload.active,
+        receive_inspection_reminder_emails: receiveInspectionReminderEmails,
       })
       .eq('user_id', payload.user_id)
 
@@ -312,6 +323,7 @@ export async function PATCH(request: Request) {
         workArea: payload.work_area || '',
         phone: payload.phone || '',
         active: payload.active,
+        receiveInspectionReminderEmails,
       },
     })
   } catch (error) {

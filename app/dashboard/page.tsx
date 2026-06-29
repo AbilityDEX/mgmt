@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { formatInspectionDateTime } from '@/lib/inspectionTime'
 import { setCurrentUser, useCurrentUser } from '@/lib/store'
 import { supabaseClient } from '@/lib/supabase'
 import MachineCard from '@/components/MachineCard'
@@ -99,7 +100,7 @@ export default function DashboardPage() {
 
       const { data: profile, error } = await supabaseClient
         .from('profiles')
-        .select('full_name')
+        .select('full_name, role')
         .eq('user_id', session.user.id)
         .maybeSingle()
 
@@ -115,6 +116,7 @@ export default function DashboardPage() {
       setCurrentUser({
         id: session.user.id,
         name: profile?.full_name || session.user.email || '',
+        role: profile?.role || '',
       })
       setAuthChecked(true)
     }
@@ -134,7 +136,7 @@ export default function DashboardPage() {
       const token = sessionData.session?.access_token
       if (!token) return
 
-      const isAdmin = ['Admin', 'admin', 'super_admin'].includes(currentUser.name ?? '')
+      const isAdmin = ['admin', 'super_admin'].includes((currentUser.role ?? '').toLowerCase())
       const url = isAdmin
         ? '/api/machines'
         : `/api/machines?assigned_to=${encodeURIComponent(currentUser.id ?? '')}`
@@ -291,7 +293,7 @@ export default function DashboardPage() {
 
         <section className="mt-5 grid grid-cols-2 gap-3">
           <article className="rounded-[24px] bg-slate-900/90 p-4 shadow-xl shadow-black/20">
-            <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Due Soon</p>
+            <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Due</p>
             <p className="mt-2 text-2xl font-semibold text-amber-300">{scheduleWidgets.dueToday}</p>
           </article>
           <article className="rounded-[24px] bg-slate-900/90 p-4 shadow-xl shadow-black/20">
@@ -303,7 +305,7 @@ export default function DashboardPage() {
             <p className="mt-2 text-2xl font-semibold text-rose-300">{scheduleWidgets.overdue}</p>
           </article>
           <article className="rounded-[24px] bg-slate-900/90 p-4 shadow-xl shadow-black/20">
-            <p className="text-xs uppercase tracking-[0.25em] text-slate-400">On Time</p>
+            <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Completed (Upcoming)</p>
             <p className="mt-2 text-2xl font-semibold text-sky-300">{scheduleWidgets.upcomingThisWeek}</p>
           </article>
           <article className="rounded-[24px] bg-slate-900/90 p-4 shadow-xl shadow-black/20">
@@ -374,10 +376,10 @@ export default function DashboardPage() {
 
           <div className="mt-4 space-y-4">
             {[
-              { key: 'dueToday', title: 'Due Soon', items: scheduleBoard.dueToday },
-              { key: 'dueThisWeek', title: 'Due Soon (Extended)', items: scheduleBoard.dueThisWeek },
+              { key: 'dueToday', title: 'Due', items: scheduleBoard.dueToday },
+              { key: 'dueThisWeek', title: 'Due Soon', items: scheduleBoard.dueThisWeek },
               { key: 'overdue', title: 'Overdue', items: scheduleBoard.overdue },
-              { key: 'upcoming', title: 'On Time', items: scheduleBoard.upcoming },
+              { key: 'upcoming', title: 'Completed', items: scheduleBoard.upcoming },
             ].map((group) => (
               <div key={group.key}>
                 <p className="text-xs uppercase tracking-[0.25em] text-slate-500">{group.title}</p>
@@ -388,7 +390,7 @@ export default function DashboardPage() {
                         <div>
                           <p className="text-sm font-semibold text-white">{item.machineName}</p>
                           <p className="mt-1 text-xs text-slate-400">Template: {item.templateName}</p>
-                          <p className="mt-1 text-xs text-slate-400">Due Date: {new Date(item.nextDue).toLocaleString()}</p>
+                          <p className="mt-1 text-xs text-slate-400">Due Date: {formatInspectionDateTime(item.nextDue)}</p>
                         </div>
                         <div className="text-right">
                           <span
@@ -397,7 +399,9 @@ export default function DashboardPage() {
                                 ? 'bg-rose-600/15 text-rose-300'
                                 : item.status === 'Due Soon'
                                   ? 'bg-amber-500/15 text-amber-300'
-                                  : item.status === 'On Time'
+                                  : item.status === 'Due'
+                                    ? 'bg-orange-500/15 text-orange-300'
+                                    : item.status === 'Completed'
                                     ? 'bg-emerald-600/15 text-emerald-300'
                                     : 'bg-emerald-600/15 text-emerald-300'
                             }`}

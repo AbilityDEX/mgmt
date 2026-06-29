@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { formatInspectionDateTime } from '@/lib/inspectionTime'
 import { supabaseClient } from '@/lib/supabase'
 import type { DraftInspection } from '@/lib/data/inspections'
 
@@ -119,10 +120,10 @@ export default function DraftInspectionsPage() {
                   </p>
                   <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
                     <span className="rounded-full bg-slate-800 px-2.5 py-1">
-                      Started: {new Date(draft.started).toLocaleString()}
+                      Started: {formatInspectionDateTime(draft.started)}
                     </span>
                     <span className="rounded-full bg-slate-800 px-2.5 py-1">
-                      Last edited: {new Date(draft.lastEdited).toLocaleString()}
+                      Last edited: {formatInspectionDateTime(draft.lastEdited)}
                     </span>
                   </div>
                   <div className="mt-3 space-y-1">

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
+import { formatInspectionDateTime } from '@/lib/inspectionTime'
 import { supabaseClient } from '@/lib/supabase'
 
 type MachineDetails = {
@@ -70,9 +71,7 @@ type AssignedTemplateForStart = {
 }
 
 function formatDisplayDate(value: string | null) {
-  if (!value) return 'N/A'
-  const parsed = new Date(value)
-  return Number.isNaN(parsed.getTime()) ? 'N/A' : parsed.toLocaleString()
+  return formatInspectionDateTime(value)
 }
 
 const defaultFrequency: AssignmentFrequency = 'Monthly'
@@ -112,10 +111,23 @@ export default function AdminMachineDetailsPage() {
       lastGenerated: string | null
       lastInspectionCompletedAt: string | null
       openInspectionId: string | null
-      status: 'Overdue' | 'Due Soon' | 'On Time' | 'Paused'
+      status: 'Overdue' | 'Due Soon' | 'Due' | 'Completed'
       active: boolean
+      diagnostics: {
+        currentTime: string
+        inspectionTime: string
+        currentStatus: string
+        dueSoonTime: string | null
+        dueTime: string
+        overdueTime: string
+        lockUntil: string
+        schedulerDecision: string
+        apiDecision: string
+        dbDecision: string
+      }
     }>
   >([])
+  const [expandedDiagnosticScheduleId, setExpandedDiagnosticScheduleId] = useState<string | null>(null)
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false)
   const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null)
   const [scheduleSaving, setScheduleSaving] = useState(false)
@@ -251,8 +263,20 @@ export default function AdminMachineDetailsPage() {
       lastGenerated: (row.lastGenerated as string | null) ?? null,
       lastInspectionCompletedAt: (row.lastInspectionCompletedAt as string | null) ?? null,
       openInspectionId: (row.openInspectionId as string | null) ?? null,
-      status: row.status as 'Overdue' | 'Due Soon' | 'On Time' | 'Paused',
+      status: row.status as 'Overdue' | 'Due Soon' | 'Due' | 'Completed',
       active: Boolean(row.active),
+      diagnostics: {
+        currentTime: String((row.diagnostics as Record<string, unknown> | undefined)?.currentTime ?? ''),
+        inspectionTime: String((row.diagnostics as Record<string, unknown> | undefined)?.inspectionTime ?? ''),
+        currentStatus: String((row.diagnostics as Record<string, unknown> | undefined)?.currentStatus ?? ''),
+        dueSoonTime: ((row.diagnostics as Record<string, unknown> | undefined)?.dueSoonTime as string | null) ?? null,
+        dueTime: String((row.diagnostics as Record<string, unknown> | undefined)?.dueTime ?? ''),
+        overdueTime: String((row.diagnostics as Record<string, unknown> | undefined)?.overdueTime ?? ''),
+        lockUntil: String((row.diagnostics as Record<string, unknown> | undefined)?.lockUntil ?? ''),
+        schedulerDecision: String((row.diagnostics as Record<string, unknown> | undefined)?.schedulerDecision ?? ''),
+        apiDecision: String((row.diagnostics as Record<string, unknown> | undefined)?.apiDecision ?? ''),
+        dbDecision: String((row.diagnostics as Record<string, unknown> | undefined)?.dbDecision ?? ''),
+      },
     })))
 
     const defaultMachineTemplateId = (payload.schedules ?? [])[0]?.machineTemplateId as string | undefined
@@ -875,7 +899,9 @@ export default function AdminMachineDetailsPage() {
                                 ? 'bg-rose-600/15 text-rose-300'
                                 : schedule.status === 'Due Soon'
                                   ? 'bg-amber-500/15 text-amber-300'
-                                  : schedule.status === 'On Time'
+                                  : schedule.status === 'Due'
+                                    ? 'bg-orange-500/15 text-orange-300'
+                                    : schedule.status === 'Completed'
                                     ? 'bg-emerald-600/15 text-emerald-300'
                                     : 'bg-emerald-600/15 text-emerald-300'
                             }`}
@@ -909,6 +935,15 @@ export default function AdminMachineDetailsPage() {
                         <button
                           type="button"
                           onClick={() => {
+                            setExpandedDiagnosticScheduleId((previous) => previous === schedule.scheduleId ? null : schedule.scheduleId)
+                          }}
+                          className="rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-100 transition hover:bg-slate-700"
+                        >
+                          {expandedDiagnosticScheduleId === schedule.scheduleId ? 'Hide Diagnostics' : 'Diagnostics'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
                             void setScheduleActiveState(schedule.scheduleId, !schedule.active)
                           }}
                           className="rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-100 transition hover:bg-slate-700"
@@ -928,6 +963,21 @@ export default function AdminMachineDetailsPage() {
                         </button>
                       </div>
                     </div>
+
+                    {expandedDiagnosticScheduleId === schedule.scheduleId ? (
+                      <div className="mt-3 grid gap-2 rounded-2xl border border-slate-800 bg-slate-900/70 p-3 text-xs md:grid-cols-2">
+                        <p className="text-slate-400">Current Time: <span className="text-slate-200">{schedule.diagnostics.currentTime}</span></p>
+                        <p className="text-slate-400">Inspection Time: <span className="text-slate-200">{schedule.diagnostics.inspectionTime}</span></p>
+                        <p className="text-slate-400">Current Status: <span className="text-slate-200">{schedule.diagnostics.currentStatus}</span></p>
+                        <p className="text-slate-400">Due Soon Time: <span className="text-slate-200">{schedule.diagnostics.dueSoonTime ?? 'N/A'}</span></p>
+                        <p className="text-slate-400">Due Time: <span className="text-slate-200">{schedule.diagnostics.dueTime}</span></p>
+                        <p className="text-slate-400">Overdue Time: <span className="text-slate-200">{schedule.diagnostics.overdueTime}</span></p>
+                        <p className="text-slate-400">Lock Until: <span className="text-slate-200">{schedule.diagnostics.lockUntil}</span></p>
+                        <p className="text-slate-400">Scheduler Decision: <span className="text-slate-200">{schedule.diagnostics.schedulerDecision}</span></p>
+                        <p className="text-slate-400">API Decision: <span className="text-slate-200">{schedule.diagnostics.apiDecision}</span></p>
+                        <p className="text-slate-400">DB Decision: <span className="text-slate-200">{schedule.diagnostics.dbDecision}</span></p>
+                      </div>
+                    ) : null}
                   </article>
                 ))
               ) : (

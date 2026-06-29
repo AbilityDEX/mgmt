@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
+import { formatInspectionDateTime } from '@/lib/inspectionTime'
 import { supabaseClient } from '@/lib/supabase'
 
 type SmtpConfig = {
@@ -226,7 +227,7 @@ export default function AdminSmtpConfigPage() {
               </button>
             </div>
 
-            {config.updatedAt ? <p className="mt-4 text-xs text-slate-400">Last updated: {new Date(config.updatedAt).toLocaleString()}</p> : null}
+            {config.updatedAt ? <p className="mt-4 text-xs text-slate-400">Last updated: {formatInspectionDateTime(config.updatedAt)}</p> : null}
           </section>
         )}
       </div>

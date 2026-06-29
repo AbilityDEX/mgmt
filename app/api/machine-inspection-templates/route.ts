@@ -142,7 +142,9 @@ export async function GET(request: Request) {
     .order('name', { ascending: true })
 
   if (assignedTemplateIds.length > 0) {
-    availableTemplatesQuery = availableTemplatesQuery.not('id', 'in', `(${assignedTemplateIds.map((id) => `'${id}'`).join(',')})`)
+    // Pass unquoted comma-separated ids to the client 'in' operator.
+    // Quoting them here led to double-quoting and invalid UUID literal errors.
+    availableTemplatesQuery = availableTemplatesQuery.not('id', 'in', `(${assignedTemplateIds.join(',')})`)
   }
 
   const { data: availableTemplatesData, error: availableTemplatesError } = await availableTemplatesQuery

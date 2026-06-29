@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
+import { INSPECTION_TIMEZONE } from '@/lib/inspectionTime'
 import { supabaseClient } from '@/lib/supabase'
 
 type CompanySettings = {
@@ -16,6 +17,11 @@ type CompanySettings = {
   dateFormat?: string | null
   timeFormat?: string | null
   defaultReplyTo?: string | null
+  dailyReminderSendTime?: string | null
+  dueSoonWarningDays?: number | null
+  enableDueSoon?: boolean | null
+  enableEmployeeReminderEmails?: boolean | null
+  enableManagementOverdueNotifications?: boolean | null
   website: string | null
   reportFooter: string | null
   reportPrimaryColor: string
@@ -39,6 +45,11 @@ type SmtpConfig = {
     timezone?: string | null
     dateFormat?: string | null
     timeFormat?: string | null
+    dailyReminderSendTime?: string | null
+    dueSoonWarningDays?: number | null
+    enableDueSoon?: boolean | null
+    enableEmployeeReminderEmails?: boolean | null
+    enableManagementOverdueNotifications?: boolean | null
   }
 }
 
@@ -94,10 +105,17 @@ export default function AdminCompanySettingsPage() {
               ...prev,
               archiveEmail: smtpConfig.orgSettings?.archiveEmail ?? prev.archiveEmail ?? null,
               supportEmail: smtpConfig.orgSettings?.supportEmail ?? prev.supportEmail ?? null,
-              timezone: smtpConfig.orgSettings?.timezone ?? prev.timezone ?? null,
+              timezone: smtpConfig.orgSettings?.timezone ?? prev.timezone ?? INSPECTION_TIMEZONE,
               dateFormat: smtpConfig.orgSettings?.dateFormat ?? prev.dateFormat ?? null,
               timeFormat: smtpConfig.orgSettings?.timeFormat ?? prev.timeFormat ?? null,
               defaultReplyTo: smtpConfig.replyToEmail ?? prev.defaultReplyTo ?? null,
+              dailyReminderSendTime: smtpConfig.orgSettings?.dailyReminderSendTime ?? prev.dailyReminderSendTime ?? '07:00',
+              dueSoonWarningDays: smtpConfig.orgSettings?.dueSoonWarningDays ?? prev.dueSoonWarningDays ?? 2,
+              enableDueSoon: smtpConfig.orgSettings?.enableDueSoon ?? prev.enableDueSoon ?? true,
+              enableEmployeeReminderEmails:
+                smtpConfig.orgSettings?.enableEmployeeReminderEmails ?? prev.enableEmployeeReminderEmails ?? true,
+              enableManagementOverdueNotifications:
+                smtpConfig.orgSettings?.enableManagementOverdueNotifications ?? prev.enableManagementOverdueNotifications ?? true,
             }
           : prev)
       }
@@ -158,9 +176,14 @@ export default function AdminCompanySettingsPage() {
           replyToEmail: settings.defaultReplyTo || smtp.replyToEmail || null,
           archiveEmail: settings.archiveEmail || null,
           supportEmail: settings.supportEmail || null,
-          timezone: settings.timezone || null,
+          timezone: INSPECTION_TIMEZONE,
           dateFormat: settings.dateFormat || null,
           timeFormat: settings.timeFormat || null,
+          dailyReminderSendTime: settings.dailyReminderSendTime || '07:00',
+          dueSoonWarningDays: Number(settings.dueSoonWarningDays ?? 2),
+          enableDueSoon: Boolean(settings.enableDueSoon ?? true),
+          enableEmployeeReminderEmails: Boolean(settings.enableEmployeeReminderEmails ?? true),
+          enableManagementOverdueNotifications: Boolean(settings.enableManagementOverdueNotifications ?? true),
         }),
       })
 
@@ -278,7 +301,8 @@ export default function AdminCompanySettingsPage() {
               </label>
               <label className="block">
                 <span className="text-sm text-slate-300">Timezone</span>
-                <input className={inputClass} value={settings.timezone ?? ''} onChange={(e) => setSettings((p) => (p ? { ...p, timezone: e.target.value } : p))} placeholder="Africa/Johannesburg" />
+                <input className={inputClass} value={settings.timezone ?? INSPECTION_TIMEZONE} readOnly placeholder={INSPECTION_TIMEZONE} />
+                <p className="mt-2 text-xs text-slate-500">Scheduling is fixed to Europe/London so GMT/BST daylight saving is handled automatically.</p>
               </label>
               <label className="block">
                 <span className="text-sm text-slate-300">Date Format</span>
@@ -287,6 +311,60 @@ export default function AdminCompanySettingsPage() {
               <label className="block">
                 <span className="text-sm text-slate-300">Time Format</span>
                 <input className={inputClass} value={settings.timeFormat ?? ''} onChange={(e) => setSettings((p) => (p ? { ...p, timeFormat: e.target.value } : p))} placeholder="HH:mm" />
+              </label>
+              <label className="block">
+                <span className="text-sm text-slate-300">Daily Reminder Send Time</span>
+                <input
+                  type="time"
+                  className={inputClass}
+                  value={settings.dailyReminderSendTime ?? '07:00'}
+                  onChange={(e) => setSettings((p) => (p ? { ...p, dailyReminderSendTime: e.target.value } : p))}
+                />
+              </label>
+              <label className="block">
+                <span className="text-sm text-slate-300">Due Soon Warning Days</span>
+                <input
+                  type="number"
+                  min={0}
+                  className={inputClass}
+                  value={settings.dueSoonWarningDays ?? 2}
+                  onChange={(e) => {
+                    const value = Number(e.target.value)
+                    setSettings((p) => (p ? { ...p, dueSoonWarningDays: Number.isFinite(value) ? Math.max(0, value) : 2 } : p))
+                  }}
+                />
+              </label>
+              <label className="block">
+                <span className="text-sm text-slate-300">Enable Due Soon</span>
+                <div className="mt-3">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(settings.enableDueSoon ?? true)}
+                    onChange={(e) => setSettings((p) => (p ? { ...p, enableDueSoon: e.target.checked } : p))}
+                  />
+                </div>
+              </label>
+              <label className="block">
+                <span className="text-sm text-slate-300">Enable Employee Reminder Emails</span>
+                <div className="mt-3">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(settings.enableEmployeeReminderEmails ?? true)}
+                    onChange={(e) => setSettings((p) => (p ? { ...p, enableEmployeeReminderEmails: e.target.checked } : p))}
+                  />
+                </div>
+              </label>
+              <label className="block md:col-span-2">
+                <span className="text-sm text-slate-300">Enable Management Overdue Notifications</span>
+                <div className="mt-3">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(settings.enableManagementOverdueNotifications ?? true)}
+                    onChange={(e) =>
+                      setSettings((p) => (p ? { ...p, enableManagementOverdueNotifications: e.target.checked } : p))
+                    }
+                  />
+                </div>
               </label>
               <label className="block md:col-span-2">
                 <span className="text-sm text-slate-300">Report Footer</span>

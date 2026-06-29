@@ -16,7 +16,6 @@ type EditState = {
   templateId?: string | null
   inspectionFrequency?: string
   reminderDaysBeforeDue?: number
-  gracePeriod?: number
   autoGenerateInspection?: boolean
   customIntervalValue?: number
   customIntervalUnit?: string | null
@@ -31,7 +30,6 @@ const emptyNew = {
   templateId: '',
   inspectionFrequency: 'Monthly',
   reminderDaysBeforeDue: 7,
-  gracePeriod: 3,
   autoGenerateInspection: true,
   customIntervalValue: 1,
   customIntervalUnit: 'Days',
@@ -48,7 +46,7 @@ function formatSchedulePreview(
 ) {
   switch (frequency) {
     case 'Daily':
-      return 'Next inspection will become due every day.'
+      return 'Next inspection becomes Due at the inspection time each day. Due Soon is not used for Daily schedules.'
     case 'Weekly':
       return 'Next inspection will become due every week.'
     case 'Fortnightly':
@@ -300,7 +298,6 @@ export default function AdminMachinesPage() {
         templateId: machine.templateId ?? '',
         inspectionFrequency: machine.inspectionFrequency ?? 'Monthly',
         reminderDaysBeforeDue: machine.reminderDaysBeforeDue ?? 7,
-        gracePeriod: machine.gracePeriod ?? 3,
         autoGenerateInspection: machine.autoGenerateInspection ?? true,
         customIntervalValue: machine.customIntervalValue ?? 1,
         customIntervalUnit: machine.customIntervalUnit ?? 'Days',
@@ -391,8 +388,8 @@ export default function AdminMachinesPage() {
           asset_id: newMachine.assetId,
           template_id: newMachine.templateId?.trim() ? newMachine.templateId.trim() : null,
           inspection_frequency: newMachine.inspectionFrequency || 'Monthly',
-          reminder_days_before_due: newMachine.reminderDaysBeforeDue ?? 7,
-          grace_period: newMachine.gracePeriod ?? 3,
+          reminder_days_before_due:
+            newMachine.inspectionFrequency === 'Daily' ? 0 : (newMachine.reminderDaysBeforeDue ?? 7),
           auto_generate_inspection: newMachine.autoGenerateInspection ?? true,
           custom_interval_value:
             newMachine.inspectionFrequency === 'Custom' ? clampNumber(newMachine.customIntervalValue ?? 1, 1, Number.MAX_SAFE_INTEGER) : null,
@@ -439,8 +436,8 @@ export default function AdminMachinesPage() {
           asset_id: editState.assetId,
           template_id: editState.templateId === undefined ? undefined : editState.templateId?.trim() ? editState.templateId.trim() : null,
           inspection_frequency: editState.inspectionFrequency || 'Monthly',
-          reminder_days_before_due: editState.reminderDaysBeforeDue ?? 7,
-          grace_period: editState.gracePeriod ?? 3,
+          reminder_days_before_due:
+            editState.inspectionFrequency === 'Daily' ? 0 : (editState.reminderDaysBeforeDue ?? 7),
           auto_generate_inspection: editState.autoGenerateInspection ?? true,
           custom_interval_value:
             editState.inspectionFrequency === 'Custom' ? clampNumber(editState.customIntervalValue ?? 1, 1, Number.MAX_SAFE_INTEGER) : null,
@@ -695,6 +692,7 @@ export default function AdminMachinesPage() {
                         setNewMachine((previous) => ({
                           ...previous,
                           inspectionFrequency: event.target.value,
+                          reminderDaysBeforeDue: event.target.value === 'Daily' ? 0 : (previous.reminderDaysBeforeDue ?? 7),
                         }))
                       }
                       className={inputClass}
@@ -711,7 +709,7 @@ export default function AdminMachinesPage() {
                     <p className="mt-2 text-sm text-slate-400">Controls how often inspections become due for this machine.</p>
                   </label>
 
-                  <div className="grid gap-5 md:grid-cols-2">
+                  {newMachine.inspectionFrequency !== 'Daily' ? (
                     <label className="block">
                       <span className="text-sm font-medium text-slate-200">Reminder Days Before Due</span>
                       <input
@@ -728,24 +726,7 @@ export default function AdminMachinesPage() {
                       />
                       <p className="mt-2 text-sm text-slate-400">Users receive reminders this many days before the inspection becomes due.</p>
                     </label>
-
-                    <label className="block">
-                      <span className="text-sm font-medium text-slate-200">Grace Period (days)</span>
-                      <input
-                        type="number"
-                        min="0"
-                        max="365"
-                        inputMode="numeric"
-                        value={newMachine.gracePeriod ?? 3}
-                        onChange={(event) => {
-                          const nextValue = event.target.value === '' ? 0 : clampNumber(Number.parseInt(event.target.value, 10) || 0, 0, 365)
-                          setNewMachine((previous) => ({ ...previous, gracePeriod: nextValue }))
-                        }}
-                        className={inputClass}
-                      />
-                      <p className="mt-2 text-sm text-slate-400">Machine is considered overdue after this many days.</p>
-                    </label>
-                  </div>
+                  ) : null}
 
                   <label className="flex items-start gap-3 rounded-[20px] border border-slate-800 bg-slate-950/80 px-4 py-4">
                     <input
@@ -920,6 +901,7 @@ export default function AdminMachinesPage() {
                               ? {
                                   ...previous,
                                   inspectionFrequency: event.target.value,
+                                  reminderDaysBeforeDue: event.target.value === 'Daily' ? 0 : (previous.reminderDaysBeforeDue ?? 7),
                                 }
                               : previous
                           )
@@ -938,7 +920,7 @@ export default function AdminMachinesPage() {
                       <p className="mt-2 text-sm text-slate-400">Controls how often inspections become due for this machine.</p>
                     </label>
 
-                    <div className="grid gap-5 md:grid-cols-2">
+                    {editState.inspectionFrequency !== 'Daily' ? (
                       <label className="block">
                         <span className="text-sm font-medium text-slate-200">Reminder Days Before Due</span>
                         <input
@@ -955,24 +937,7 @@ export default function AdminMachinesPage() {
                         />
                         <p className="mt-2 text-sm text-slate-400">Users receive reminders this many days before the inspection becomes due.</p>
                       </label>
-
-                      <label className="block">
-                        <span className="text-sm font-medium text-slate-200">Grace Period (days)</span>
-                        <input
-                          type="number"
-                          min="0"
-                          max="365"
-                          inputMode="numeric"
-                          value={editState.gracePeriod ?? 3}
-                          onChange={(event) => {
-                            const nextValue = event.target.value === '' ? 0 : clampNumber(Number.parseInt(event.target.value, 10) || 0, 0, 365)
-                            setEditState((previous) => (previous ? { ...previous, gracePeriod: nextValue } : previous))
-                          }}
-                          className={inputClass}
-                        />
-                        <p className="mt-2 text-sm text-slate-400">Machine is considered overdue after this many days.</p>
-                      </label>
-                    </div>
+                    ) : null}
 
                     <label className="flex items-start gap-3 rounded-[20px] border border-slate-800 bg-slate-950/80 px-4 py-4">
                       <input

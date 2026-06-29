@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
+import { formatInspectionDateTime } from '@/lib/inspectionTime'
 import { supabaseClient } from '@/lib/supabase'
 import StatusBadge from '@/components/StatusBadge'
 
@@ -77,7 +78,7 @@ export default function AdminFailedInspectionsPage() {
                     <p className="text-sm uppercase tracking-[0.35em] text-slate-400">Machine</p>
                     <p className="mt-1 text-lg font-semibold text-white">{inspection.machineId}</p>
                     <p className="mt-2 text-sm text-slate-500">Operator: {inspection.operatorName}</p>
-                    <p className="text-sm text-slate-500">Completed: {new Date(inspection.completedAt).toLocaleString()}</p>
+                    <p className="text-sm text-slate-500">Completed: {formatInspectionDateTime(inspection.completedAt)}</p>
                   </div>
                   <StatusBadge label="Failed" variant="danger" />
                 </div>

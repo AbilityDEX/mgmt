@@ -1,9 +1,26 @@
-import { CronExpressionParser } from 'cron-parser'
 import {
   serverConfigErrorMessage,
   supabaseAdmin,
 } from '@/lib/admin'
+import {
+  addLondonDays,
+  addLondonMonths,
+  calculateNextInspectionDueAt,
+  combineLondonDateAndTime,
+  endOfLondonDay,
+  endOfLondonWeek,
+  formatInspectionDateTime,
+  INSPECTION_TIMEZONE,
+  startOfLondonDay,
+} from '@/lib/inspectionTime'
+import { trackInspectionEvent } from '@/lib/services/inspectionMetrics'
+import { getCompanySettings } from '@/lib/services/companySettings'
 import { getInspectionEngineMetrics } from '@/lib/services/inspectionMetrics'
+import { sendManagementAlert } from '@/lib/services/managementNotifications'
+import {
+  buildInspectionEventKey,
+  buildInspectionGenerationKey,
+} from '@/lib/services/schedulerKeys'
 
 export type ScheduleFrequency =
   | 'Daily'
@@ -26,7 +43,7 @@ export const scheduleFrequencies: ScheduleFrequency[] = [
   'Custom',
 ]
 
-export type ScheduleStatus = 'Overdue' | 'Due Soon' | 'On Time' | 'Paused'
+export type ScheduleStatus = 'Completed' | 'Due Soon' | 'Due' | 'Overdue'
 
 type DueBucket = 'dueToday' | 'dueThisWeek' | 'overdue' | 'upcoming'
 
@@ -37,10 +54,42 @@ type SchedulerMachineTemplateRow = {
   inspection_frequency: ScheduleFrequency
   active: boolean
   machines:
-    | { id: string; name: string; status: string | null; grace_period: number | null }
-    | { id: string; name: string; status: string | null; grace_period: number | null }[]
+    | {
+        id: string
+        name: string
+        status: string | null
+        inspection_deadline: string | null
+        inspection_frequency: string | null
+        reminder_days_before_due: number | null
+        assigned_user: string | null
+        area: string | null
+      }
+    | {
+        id: string
+        name: string
+        status: string | null
+        inspection_deadline: string | null
+        inspection_frequency: string | null
+        reminder_days_before_due: number | null
+        assigned_user: string | null
+        area: string | null
+      }[]
     | null
   checklist_templates: { id: string; name: string } | { id: string; name: string }[] | null
+}
+
+type SchedulerAssignedProfile = {
+  user_id: string
+  username: string
+  full_name: string | null
+  active: boolean | null
+}
+
+type GeneratedInspectionResult = {
+  inspectionId: string | null
+  generationKey: string
+  created: boolean
+  itemSnapshotCreated: boolean
 }
 
 type SchedulerScheduleRow = {
@@ -72,7 +121,6 @@ type CoverageMachineRow = {
   inspection_frequency: string | null
   inspection_deadline: string | null
   reminder_days_before_due: number | null
-  grace_period: number | null
 }
 
 type CoverageAssignmentRow = {
@@ -89,7 +137,7 @@ type ScheduleOverviewRow = {
   machineTemplateId: string
   machineId: string
   machineName: string
-  machineGracePeriod: number
+  machineInspectionDeadline: string | null
   templateId: string
   templateName: string
   frequency: ScheduleFrequency
@@ -103,6 +151,18 @@ type ScheduleOverviewRow = {
   openInspectionId: string | null
   openInspectionIsOverdue: boolean
   status: ScheduleStatus
+  diagnostics: {
+    currentTime: string
+    inspectionTime: string
+    currentStatus: string
+    dueSoonTime: string | null
+    dueTime: string
+    overdueTime: string
+    lockUntil: string
+    schedulerDecision: string
+    apiDecision: string
+    dbDecision: string
+  }
 }
 
 function toSingle<T>(value: T | T[] | null | undefined): T | null {
@@ -110,45 +170,21 @@ function toSingle<T>(value: T | T[] | null | undefined): T | null {
   return Array.isArray(value) ? (value[0] ?? null) : value
 }
 
-function addMonths(date: Date, monthCount: number) {
-  const next = new Date(date)
-  next.setUTCMonth(next.getUTCMonth() + monthCount)
-  return next
+function supportsDueSoon(frequency: ScheduleFrequency) {
+  return frequency !== 'Daily'
 }
 
-function addDays(date: Date, dayCount: number) {
-  const next = new Date(date)
-  next.setUTCDate(next.getUTCDate() + dayCount)
-  return next
-}
+function resolveScheduleWindow(nextDueIso: string, deadline: string | null) {
+  const dueAt = new Date(nextDueIso)
+  if (Number.isNaN(dueAt.getTime())) return null
 
-function startOfUtcDay(date: Date) {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 0, 0, 0, 0))
-}
+  const normalizedDueAt = deadline ? combineLondonDateAndTime(dueAt, deadline) : dueAt
+  if (Number.isNaN(normalizedDueAt.getTime())) return null
 
-function endOfUtcDay(date: Date) {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 23, 59, 59, 999))
-}
-
-function endOfUtcWeek(date: Date) {
-  const start = startOfUtcDay(date)
-  const day = start.getUTCDay() || 7
-  const offset = 7 - day
-  const end = new Date(start)
-  end.setUTCDate(start.getUTCDate() + offset)
-  return endOfUtcDay(end)
-}
-
-function getGraceCutoff(dueDate: Date, gracePeriodDays: number) {
-  return addDays(startOfUtcDay(dueDate), Math.max(0, gracePeriodDays))
-}
-
-function isScheduleDue(nextDue: Date, now: Date, gracePeriodDays: number) {
-  return nextDue <= now && now < getGraceCutoff(nextDue, gracePeriodDays)
-}
-
-function isScheduleOverdue(nextDue: Date, now: Date, gracePeriodDays: number) {
-  return now >= getGraceCutoff(nextDue, gracePeriodDays)
+  return {
+    dueStart: startOfLondonDay(normalizedDueAt),
+    dueAt: normalizedDueAt,
+  }
 }
 
 export function calculateNextDue(params: {
@@ -156,53 +192,192 @@ export function calculateNextDue(params: {
   intervalValue?: number
   customCron?: string | null
   fromDate: Date
+  inspectionTime?: string | null
 }) {
-  const intervalValue = Math.max(1, params.intervalValue ?? 1)
-  const base = startOfUtcDay(new Date(params.fromDate))
+  return calculateNextInspectionDueAt(params)
+}
 
-  switch (params.frequency) {
-    case 'Daily': {
-      const next = new Date(base)
-      next.setUTCDate(next.getUTCDate() + intervalValue)
-      return next
-    }
-    case 'Weekly': {
-      const next = new Date(base)
-      next.setUTCDate(next.getUTCDate() + 7 * intervalValue)
-      return next
-    }
-    case 'Fortnightly': {
-      const next = new Date(base)
-      next.setUTCDate(next.getUTCDate() + 14 * intervalValue)
-      return next
-    }
-    case 'Monthly':
-      return addMonths(base, intervalValue)
-    case 'Quarterly':
-      return addMonths(base, 3 * intervalValue)
-    case 'Six Monthly':
-      return addMonths(base, 6 * intervalValue)
-    case 'Annually':
-      return addMonths(base, 12 * intervalValue)
-    case 'Custom': {
-      if (!params.customCron?.trim()) {
-        const next = new Date(base)
-        next.setUTCDate(next.getUTCDate() + intervalValue)
-        return next
+async function ensureGeneratedInspectionForSchedule(params: {
+  scheduleId: string
+  machineId: string
+  templateId: string
+  templateName: string
+  dueAt: Date
+  assignedProfile: SchedulerAssignedProfile | null
+}) {
+  if (!supabaseAdmin) {
+    throw new Error(serverConfigErrorMessage)
+  }
+
+  const generationKey = buildInspectionGenerationKey(params.scheduleId, params.dueAt)
+  const assignedProfile = params.assignedProfile
+
+  if (!assignedProfile?.user_id) {
+    return {
+      inspectionId: null,
+      generationKey,
+      created: false,
+      itemSnapshotCreated: false,
+    } satisfies GeneratedInspectionResult
+  }
+
+  let inspectionId: string | null = null
+  let created = false
+
+  const { data: existingInspection, error: existingInspectionError } = await supabaseAdmin
+    .from('inspections')
+    .select('id')
+    .eq('generation_key', generationKey)
+    .maybeSingle()
+
+  if (existingInspectionError) {
+    throw existingInspectionError
+  }
+
+  inspectionId = (existingInspection?.id as string | undefined) ?? null
+
+  if (!inspectionId) {
+    const { data: insertedInspection, error: insertInspectionError } = await supabaseAdmin
+      .from('inspections')
+      .insert([
+        {
+          machine_id: params.machineId,
+          operator_id: assignedProfile.user_id,
+          operator_name: assignedProfile.full_name ?? assignedProfile.username,
+          checklist: [],
+          completed_at: null,
+          due_at: params.dueAt.toISOString(),
+          generation_key: generationKey,
+          is_overdue: false,
+          schedule_id: params.scheduleId,
+          status: 'Draft',
+          template_id: params.templateId,
+          template_name: params.templateName,
+          template_version: 1,
+          started_by: null,
+          started_at: null,
+          completion_source: 'scheduler',
+        },
+      ])
+      .select('id')
+      .maybeSingle()
+
+    if (insertInspectionError) {
+      if ('code' in insertInspectionError && insertInspectionError.code === '23505') {
+        const { data: duplicateInspection, error: duplicateInspectionError } = await supabaseAdmin
+          .from('inspections')
+          .select('id')
+          .eq('generation_key', generationKey)
+          .maybeSingle()
+
+        if (duplicateInspectionError) {
+          throw duplicateInspectionError
+        }
+
+        inspectionId = (duplicateInspection?.id as string | undefined) ?? null
+      } else {
+        throw insertInspectionError
       }
-
-      const parsed = CronExpressionParser.parse(params.customCron, {
-        currentDate: base,
-        tz: 'UTC',
-      })
-      return startOfUtcDay(parsed.next().toDate())
-    }
-    default: {
-      const fallback = new Date(base)
-      fallback.setUTCDate(fallback.getUTCDate() + 1)
-      return fallback
+    } else {
+      inspectionId = (insertedInspection?.id as string | undefined) ?? null
+      created = Boolean(inspectionId)
     }
   }
+
+  if (!inspectionId) {
+    return {
+      inspectionId: null,
+      generationKey,
+      created: false,
+      itemSnapshotCreated: false,
+    } satisfies GeneratedInspectionResult
+  }
+
+  const { count: existingItemCount, error: existingItemCountError } = await supabaseAdmin
+    .from('inspection_items')
+    .select('id', { count: 'exact', head: true })
+    .eq('inspection_id', inspectionId)
+
+  if (existingItemCountError) {
+    throw existingItemCountError
+  }
+
+  let itemSnapshotCreated = false
+  if ((existingItemCount ?? 0) === 0) {
+    const { data: templateItems, error: templateItemsError } = await supabaseAdmin
+      .from('checklist_template_items')
+      .select('id, display_order, question, question_type, required')
+      .eq('template_id', params.templateId)
+      .order('display_order', { ascending: true })
+
+    if (templateItemsError) {
+      throw templateItemsError
+    }
+
+      if ((templateItems ?? []).length > 0) {
+        const snapshotRows = (templateItems ?? []).map((item) => ({
+          inspection_id: inspectionId,
+          original_template_item_id: item.id as string,
+          display_order: Number(item.display_order ?? 0),
+          question: item.question as string,
+          question_type: (item.question_type as string | null) ?? 'pass_fail',
+          required: Boolean(item.required ?? true),
+          completed: false,
+        }))
+
+        // Postgres does not allow ON CONFLICT (cols) to reference a partial
+        // unique index (one with a WHERE clause). The unique index
+        // `idx_inspection_items_template_snapshot_unique` is partial
+        // (WHERE original_template_item_id IS NOT NULL) so an UPSERT with an
+        // ON CONFLICT(column list) fails with 42P10. To preserve DB-side
+        // constraints and avoid schema changes, insert rows individually and
+        // ignore duplicate-key errors (23505). This maintains idempotency
+        // and avoids relying on ON CONFLICT against a partial index.
+        for (const row of snapshotRows) {
+          const { error: insertErr } = await supabaseAdmin.from('inspection_items').insert([row])
+          if (insertErr) {
+            // If the row already exists (concurrent insert), ignore the
+            // duplicate-key error. Otherwise rethrow.
+            if (typeof insertErr === 'object' && 'code' in insertErr && String((insertErr as any).code) === '23505') {
+              // duplicate - ignore
+            } else {
+              throw new Error(
+                `generate draft inspections failed at statement: insert inspection_items snapshot: ${insertErr?.message ?? String(insertErr)}`,
+                { cause: insertErr }
+              )
+            }
+          }
+        }
+        itemSnapshotCreated = true
+      }
+  }
+
+  return {
+    inspectionId,
+    generationKey,
+    created,
+    itemSnapshotCreated,
+  } satisfies GeneratedInspectionResult
+}
+
+async function getInspectionDeadlineForMachineTemplate(machineTemplateId: string) {
+  if (!supabaseAdmin) {
+    throw new Error(serverConfigErrorMessage)
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('machine_inspection_templates')
+    .select('machines(inspection_deadline)')
+    .eq('id', machineTemplateId)
+    .maybeSingle()
+
+  if (error) {
+    throw error
+  }
+
+  const machineRelation = data?.machines
+  const machine = Array.isArray(machineRelation) ? (machineRelation[0] ?? null) : machineRelation
+  return (machine?.inspection_deadline as string | null | undefined) ?? '09:00'
 }
 
 export async function ensureScheduleForMachineTemplate(params: {
@@ -218,14 +393,18 @@ export async function ensureScheduleForMachineTemplate(params: {
   }
 
   const intervalValue = Math.max(1, params.intervalValue ?? 1)
+  const inspectionTime = await getInspectionDeadlineForMachineTemplate(params.machineTemplateId)
   const base = params.nextDue ?? new Date()
   const nextDue = params.nextDue ?? calculateNextDue({
     frequency: params.frequency,
     intervalValue,
     customCron: params.customCron,
     fromDate: base,
+    inspectionTime,
   })
-  const normalizedNextDue = startOfUtcDay(nextDue)
+  const normalizedNextDue = params.nextDue
+    ? combineLondonDateAndTime(params.nextDue, inspectionTime)
+    : nextDue
 
   const { data: existingSchedule, error: existingError } = await supabaseAdmin
     .from('inspection_schedules')
@@ -278,6 +457,30 @@ export async function ensureScheduleForMachineTemplate(params: {
   return { scheduleId: existingSchedule.id as string, created: false }
 }
 
+export async function resolveScheduleForAssignment(assignmentId: string) {
+  if (!supabaseAdmin) {
+    throw new Error(serverConfigErrorMessage)
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('inspection_schedules')
+    .select('id, machine_template_id, next_due, active')
+    .eq('machine_template_id', assignmentId)
+    .eq('active', true)
+    .maybeSingle()
+
+  if (error) {
+    throw error
+  }
+
+  return (data as {
+    id: string
+    machine_template_id: string
+    next_due: string
+    active: boolean
+  } | null) ?? null
+}
+
 export async function repairInspectionScheduleCoverage(now = new Date()) {
   if (!supabaseAdmin) {
     throw new Error(serverConfigErrorMessage)
@@ -286,7 +489,7 @@ export async function repairInspectionScheduleCoverage(now = new Date()) {
   const { data: assignmentsData, error: assignmentsError } = await supabaseAdmin
     .from('machine_inspection_templates')
     .select(
-      'id, machine_id, template_id, inspection_frequency, active, machines(id, inspection_frequency, inspection_deadline, reminder_days_before_due, grace_period)'
+      'id, machine_id, template_id, inspection_frequency, active, machines(id, inspection_frequency, inspection_deadline, reminder_days_before_due)'
     )
     .eq('active', true)
 
@@ -453,7 +656,6 @@ export async function repairInspectionScheduleCoverage(now = new Date()) {
       inspection_frequency: configuredFrequency,
       inspection_deadline: machine?.inspection_deadline ?? null,
       reminder_days_before_due: machine?.reminder_days_before_due ?? null,
-      grace_period: machine?.grace_period ?? null,
       completed_at: completionAt,
       next_due: nextDue.toISOString(),
     })
@@ -493,7 +695,7 @@ async function markOverdueInspections(now: Date) {
 
   const { data: openInspections, error: openError } = await supabaseAdmin
     .from('inspections')
-    .select('id, due_at, inspection_schedules(machine_inspection_templates(machines(grace_period)))')
+    .select('id, due_at')
     .eq('status', 'In Progress')
     .eq('is_overdue', false)
 
@@ -511,15 +713,7 @@ async function markOverdueInspections(now: Date) {
     const dueAt = inspection.due_at ? new Date(inspection.due_at as string) : null
     if (!dueAt || Number.isNaN(dueAt.getTime())) continue
 
-    const schedules = inspection.inspection_schedules
-    const schedule = Array.isArray(schedules) ? schedules[0] : schedules
-    const machineTemplate = schedule?.machine_inspection_templates
-    const machineTemplateRow = Array.isArray(machineTemplate) ? machineTemplate[0] : machineTemplate
-    const machine = machineTemplateRow?.machines
-    const machineRow = Array.isArray(machine) ? machine[0] : machine
-    const gracePeriod = Number(machineRow?.grace_period ?? 0)
-
-    if (isScheduleOverdue(dueAt, now, gracePeriod)) {
+    if (now > dueAt) {
       ids.push(inspection.id as string)
     }
   }
@@ -547,6 +741,10 @@ export async function runInspectionScheduler(now = new Date()) {
   const db = supabaseAdmin
 
   const nowIso = now.toISOString()
+  const companySettings = await getCompanySettings().catch(() => null)
+  const companyDueSoonWarningDays = Math.max(0, Number(companySettings?.dueSoonWarningDays ?? 2))
+  const dueSoonEnabled = Boolean(companySettings?.enableDueSoon ?? true)
+  const managementOverdueEnabled = Boolean(companySettings?.enableManagementOverdueNotifications ?? true)
 
   const repairSummary = await repairInspectionScheduleCoverage(now)
 
@@ -554,7 +752,7 @@ export async function runInspectionScheduler(now = new Date()) {
     .from('inspection_schedules')
     .select(
       `id, machine_template_id, frequency, interval_value, custom_cron, next_due, last_generated, active,
-      machine_inspection_templates(id, machine_id, template_id, inspection_frequency, active, checklist_templates(id, name), machines(id, name, status, grace_period))`
+      machine_inspection_templates(id, machine_id, template_id, inspection_frequency, active, checklist_templates(id, name), machines(id, name, area, status, inspection_deadline, inspection_frequency, reminder_days_before_due, assigned_user))`
     )
     .eq('active', true)
     .order('next_due', { ascending: true })
@@ -565,9 +763,40 @@ export async function runInspectionScheduler(now = new Date()) {
 
   const dueSchedules = (scheduleRows ?? []) as SchedulerScheduleRow[]
 
+  const assignedUsernames = Array.from(
+    new Set(
+      dueSchedules
+        .map((schedule) => {
+          const machineTemplate = toSingle(schedule.machine_inspection_templates)
+          const machine = toSingle(machineTemplate?.machines ?? null)
+          return machine?.assigned_user?.trim() ?? ''
+        })
+        .filter(Boolean)
+    )
+  )
+
+  const assignedProfileByUsername = new Map<string, SchedulerAssignedProfile>()
+  if (assignedUsernames.length > 0) {
+    const { data: profilesData, error: profilesError } = await db
+      .from('profiles')
+      .select('user_id, username, full_name, active')
+      .in('username', assignedUsernames)
+
+    if (profilesError) {
+      throw profilesError
+    }
+
+    for (const profile of (profilesData ?? []) as SchedulerAssignedProfile[]) {
+      assignedProfileByUsername.set(profile.username, profile)
+    }
+  }
+
   const overdueMarked = await markOverdueInspections(now)
 
   const machineStatusUpdates = new Map<string, string>()
+  const overdueTransitions: Array<{ machineId: string; machineName: string; machineArea: string | null; nextDue: string }> = []
+  let generatedCount = 0
+  let skippedDuplicateCount = 0
 
   for (const schedule of dueSchedules) {
     const machineTemplate = toSingle(schedule.machine_inspection_templates)
@@ -575,6 +804,8 @@ export async function runInspectionScheduler(now = new Date()) {
 
     const machine = toSingle(machineTemplate.machines)
     if (!machine?.id) continue
+
+    const template = toSingle(machineTemplate.checklist_templates)
 
     const { data: openInspection, error: openInspectionError } = await db
       .from('inspections')
@@ -594,14 +825,72 @@ export async function runInspectionScheduler(now = new Date()) {
       continue
     }
 
-    const nextDue = new Date(schedule.next_due)
-    const gracePeriod = Number(machine.grace_period ?? 0)
-    if (isScheduleOverdue(nextDue, now, gracePeriod)) {
+    const window = resolveScheduleWindow(schedule.next_due, machine.inspection_deadline)
+    if (!window) continue
+
+    if (template?.id && now >= window.dueStart) {
+      const generatedInspection = await ensureGeneratedInspectionForSchedule({
+        scheduleId: schedule.id,
+        machineId: machine.id,
+        templateId: template.id,
+        templateName: template.name,
+        dueAt: window.dueAt,
+        assignedProfile: machine.assigned_user
+          ? assignedProfileByUsername.get(machine.assigned_user) ?? null
+          : null,
+      })
+
+      if (generatedInspection.created) {
+        generatedCount += 1
+        await trackInspectionEvent({
+          eventType: 'generated_cycle',
+          inspectionId: generatedInspection.inspectionId,
+          machineId: machine.id,
+          scheduleId: schedule.id,
+          details: {
+            generationKey: generatedInspection.generationKey,
+            dueAt: window.dueAt.toISOString(),
+          },
+          eventKey: buildInspectionEventKey('generated-cycle', schedule.id, window.dueAt),
+        }).catch(() => undefined)
+      } else if (now >= window.dueStart) {
+        skippedDuplicateCount += 1
+      }
+    }
+
+    const dueSoonWarningDays = Math.max(0, Number(machine.reminder_days_before_due ?? companyDueSoonWarningDays))
+    const dueSoonThreshold = addLondonDays(window.dueAt, -dueSoonWarningDays)
+    if (now > window.dueAt) {
       machineStatusUpdates.set(machine.id, 'Overdue')
-    } else if (nextDue <= now) {
+      if ((machine.status ?? '') !== 'Overdue') {
+        const overdueEventKey = buildInspectionEventKey('overdue-notification', schedule.id, window.dueAt)
+        try {
+          await trackInspectionEvent({
+            eventType: 'overdue_notification_sent',
+            machineId: machine.id,
+            scheduleId: schedule.id,
+            details: {
+              dueAt: window.dueAt.toISOString(),
+            },
+            eventKey: overdueEventKey,
+          })
+
+          overdueTransitions.push({
+            machineId: machine.id,
+            machineName: machine.name,
+            machineArea: machine.area,
+            nextDue: window.dueAt.toISOString(),
+          })
+        } catch {
+          // Another safe scheduler execution already recorded this transition.
+        }
+      }
+    } else if (now >= window.dueStart) {
       machineStatusUpdates.set(machine.id, 'Due')
+    } else if (dueSoonEnabled && supportsDueSoon(schedule.frequency) && now >= dueSoonThreshold) {
+      machineStatusUpdates.set(machine.id, 'Due Soon')
     } else {
-      machineStatusUpdates.set(machine.id, 'Completed')
+      machineStatusUpdates.set(machine.id, machine.status === 'Completed' ? 'Completed' : 'Not Started')
     }
   }
 
@@ -613,10 +902,24 @@ export async function runInspectionScheduler(now = new Date()) {
     )
   }
 
+  if (managementOverdueEnabled && overdueTransitions.length > 0) {
+    for (const item of overdueTransitions) {
+      await sendManagementAlert({
+        event: 'inspection_overdue',
+        machineId: item.machineId,
+        machineName: item.machineName,
+        machineArea: item.machineArea,
+        reference: item.machineId,
+        subject: `Inspection Overdue - ${item.machineName}`,
+        details: `Inspection is overdue as of ${formatInspectionDateTime(item.nextDue)} (${INSPECTION_TIMEZONE}).`,
+      }).catch(() => undefined)
+    }
+  }
+
   return {
     checkedCount: dueSchedules.length,
-    generatedCount: 0,
-    skippedDuplicateCount: 0,
+    generatedCount,
+    skippedDuplicateCount,
     overdueMarked,
     processedAt: nowIso,
     scheduleRepair: repairSummary,
@@ -625,22 +928,25 @@ export async function runInspectionScheduler(now = new Date()) {
 
 function getScheduleStatus(row: {
   active: boolean
-  nextDue: Date
+  frequency: ScheduleFrequency
+  dueStart: Date
+  dueAt: Date
   hasOpenInspection: boolean
   openInspectionIsOverdue: boolean
-  gracePeriod: number
+  dueSoonEnabled: boolean
+  dueSoonWarningDays: number
   now: Date
 }): ScheduleStatus {
-  if (!row.active) return 'Paused'
+  if (!row.active) return 'Completed'
   if (row.openInspectionIsOverdue) return 'Overdue'
 
-  const dueSoonThreshold = endOfUtcWeek(row.now)
+  if (row.now > row.dueAt) return 'Overdue'
+  if (row.now >= row.dueStart || row.hasOpenInspection) return 'Due'
 
-  if (isScheduleOverdue(row.nextDue, row.now, row.gracePeriod)) return 'Overdue'
-  if (row.nextDue <= dueSoonThreshold) return 'Due Soon'
-  if (row.hasOpenInspection) return 'Due Soon'
+  const dueSoonStart = addLondonDays(row.dueAt, -row.dueSoonWarningDays)
+  if (row.dueSoonEnabled && supportsDueSoon(row.frequency) && row.now >= dueSoonStart) return 'Due Soon'
 
-  return 'On Time'
+  return 'Completed'
 }
 
 export async function getScheduleOverview(now = new Date()) {
@@ -652,7 +958,7 @@ export async function getScheduleOverview(now = new Date()) {
     .from('inspection_schedules')
     .select(
       `id, machine_template_id, frequency, interval_value, custom_cron, next_due, last_generated, active,
-      machine_inspection_templates(id, machine_id, template_id, active, checklist_templates(id, name), machines(id, name, status, grace_period))`
+      machine_inspection_templates(id, machine_id, template_id, active, checklist_templates(id, name), machines(id, name, status, inspection_deadline, inspection_frequency, reminder_days_before_due, assigned_user, area))`
     )
     .order('next_due', { ascending: true })
 
@@ -665,15 +971,47 @@ export async function getScheduleOverview(now = new Date()) {
       machine_inspection_templates:
         | (SchedulerMachineTemplateRow & {
             machines:
-              | { id: string; name: string; status: string | null; grace_period: number | null }
-              | { id: string; name: string; status: string | null; grace_period: number | null }[]
+              | {
+                  id: string
+                  name: string
+                  status: string | null
+                  inspection_deadline: string | null
+                  inspection_frequency: string | null
+                  reminder_days_before_due: number | null
+                  area: string | null
+                }
+              | {
+                  id: string
+                  name: string
+                  status: string | null
+                  inspection_deadline: string | null
+                  inspection_frequency: string | null
+                  reminder_days_before_due: number | null
+                  area: string | null
+                }[]
               | null
           })
         | Array<
             SchedulerMachineTemplateRow & {
               machines:
-                | { id: string; name: string; status: string | null; grace_period: number | null }
-                | { id: string; name: string; status: string | null; grace_period: number | null }[]
+                | {
+                    id: string
+                    name: string
+                    status: string | null
+                    inspection_deadline: string | null
+                    inspection_frequency: string | null
+                    reminder_days_before_due: number | null
+                    area: string | null
+                  }
+                | {
+                    id: string
+                    name: string
+                    status: string | null
+                    inspection_deadline: string | null
+                    inspection_frequency: string | null
+                    reminder_days_before_due: number | null
+                    area: string | null
+                  }[]
                 | null
             }
           >
@@ -724,6 +1062,9 @@ export async function getScheduleOverview(now = new Date()) {
   }
 
   const rows: ScheduleOverviewRow[] = []
+  const companySettings = await getCompanySettings().catch(() => null)
+  const companyDueSoonWarningDays = Math.max(0, Number(companySettings?.dueSoonWarningDays ?? 2))
+  const dueSoonEnabled = Boolean(companySettings?.enableDueSoon ?? true)
 
   for (const schedule of schedules) {
     const machineTemplate = toSingle(schedule.machine_inspection_templates)
@@ -733,26 +1074,49 @@ export async function getScheduleOverview(now = new Date()) {
     const machine = toSingle(
       (machineTemplate as SchedulerMachineTemplateRow & {
         machines:
-          | { id: string; name: string; status: string | null; grace_period: number | null }
-          | { id: string; name: string; status: string | null; grace_period: number | null }[]
+          | {
+              id: string
+              name: string
+              status: string | null
+              inspection_deadline: string | null
+              inspection_frequency: string | null
+              reminder_days_before_due: number | null
+              area: string | null
+            }
+          | {
+              id: string
+              name: string
+              status: string | null
+              inspection_deadline: string | null
+              inspection_frequency: string | null
+              reminder_days_before_due: number | null
+              area: string | null
+            }[]
           | null
       }).machines
     )
 
     if (!template?.id || !machine?.id) continue
 
-    const gracePeriod = Number(machine.grace_period ?? 0)
-
     const openInspection = openInspectionByScheduleId.get(schedule.id)
     const lastCompleted = lastCompletedByScheduleId.get(schedule.id)
-    const nextDue = new Date(schedule.next_due)
+    const window = resolveScheduleWindow(schedule.next_due, machine.inspection_deadline)
+    if (!window) continue
+    const dueSoonWarningDays = Math.max(0, Number(machine.reminder_days_before_due ?? companyDueSoonWarningDays))
+    const dueSoonTime = supportsDueSoon(schedule.frequency)
+      ? addLondonDays(window.dueAt, -dueSoonWarningDays).toISOString()
+      : null
+
 
     const status = getScheduleStatus({
       active: Boolean(schedule.active),
-      nextDue,
+      frequency: schedule.frequency,
+      dueStart: window.dueStart,
+      dueAt: window.dueAt,
       hasOpenInspection: Boolean(openInspection?.inspectionId),
       openInspectionIsOverdue: Boolean(openInspection?.isOverdue),
-      gracePeriod,
+      dueSoonEnabled,
+      dueSoonWarningDays,
       now,
     })
 
@@ -761,7 +1125,7 @@ export async function getScheduleOverview(now = new Date()) {
       machineTemplateId: schedule.machine_template_id,
       machineId: machine.id,
       machineName: machine.name,
-      machineGracePeriod: gracePeriod,
+      machineInspectionDeadline: machine.inspection_deadline,
       templateId: template.id,
       templateName: template.name,
       frequency: schedule.frequency,
@@ -775,6 +1139,18 @@ export async function getScheduleOverview(now = new Date()) {
       openInspectionId: openInspection?.inspectionId ?? null,
       openInspectionIsOverdue: Boolean(openInspection?.isOverdue),
       status,
+      diagnostics: {
+        currentTime: now.toISOString(),
+        inspectionTime: machine.inspection_deadline ?? '09:00',
+        currentStatus: machine.status ?? 'Unknown',
+        dueSoonTime,
+        dueTime: window.dueAt.toISOString(),
+        overdueTime: window.dueAt.toISOString(),
+        lockUntil: window.dueStart.toISOString(),
+        schedulerDecision: `computed_status=${status}; frequency=${schedule.frequency}`,
+        apiDecision: now < window.dueStart ? 'start_locked_until_due_day' : 'start_allowed',
+        dbDecision: `machine_status=${machine.status ?? 'Unknown'}; schedule_active=${Boolean(schedule.active)}`,
+      },
     })
   }
 
@@ -790,19 +1166,19 @@ export async function getScheduleOverview(now = new Date()) {
 
     if (row.status === 'Overdue') {
       dueBuckets.overdue.push(row)
-    } else if (nextDueDate <= now) {
+    } else if (row.status === 'Due') {
       dueBuckets.dueToday.push(row)
-    } else if (nextDueDate <= endOfUtcWeek(now)) {
+    } else if (row.status === 'Due Soon') {
       dueBuckets.dueThisWeek.push(row)
-    } else if (row.status === 'On Time') {
+    } else if (row.status === 'Completed' && nextDueDate <= endOfLondonWeek(now)) {
       dueBuckets.upcoming.push(row)
     }
   }
 
-  const todayStart = startOfUtcDay(now)
-  const todayEnd = endOfUtcDay(now)
-  const tomorrowStart = startOfUtcDay(addDays(now, 1))
-  const tomorrowEnd = endOfUtcDay(addDays(now, 1))
+  const todayStart = startOfLondonDay(now)
+  const todayEnd = endOfLondonDay(now)
+  const tomorrowStart = startOfLondonDay(addLondonDays(now, 1))
+  const tomorrowEnd = endOfLondonDay(addLondonDays(now, 1))
 
   const { count: completedTodayCount } = await supabaseAdmin
     .from('inspections')
@@ -905,6 +1281,7 @@ export async function advanceScheduleFromCompletedInspection(params: {
     intervalValue: Number(scheduleData.interval_value ?? 1),
     customCron: (scheduleData.custom_cron as string | null) ?? null,
     fromDate: params.completedAt,
+    inspectionTime: await getInspectionDeadlineForMachineTemplate(scheduleData.machine_template_id as string),
   })
 
   const { error: updateError } = await supabaseAdmin

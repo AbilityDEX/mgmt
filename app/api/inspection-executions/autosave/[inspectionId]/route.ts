@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { requireAuth, serverConfigErrorMessage, supabaseAdmin } from '@/lib/admin'
+import { requireAuthContext, serverConfigErrorMessage, supabaseAdmin } from '@/lib/admin'
+import { canAccessInspection } from '@/lib/services/inspectionAccess'
 import { autoSaveInspectionProgress } from '@/lib/services/inspectionDrafts'
 
 type RouteContext = {
@@ -11,7 +12,7 @@ type RouteContext = {
  * Autosave inspection progress (current question, scroll position, etc)
  */
 export async function POST(request: Request, context: RouteContext) {
-  const auth = await requireAuth(request)
+  const auth = await requireAuthContext(request)
   if ('error' in auth) {
     return NextResponse.json({ error: auth.error }, { status: auth.status })
   }
@@ -21,6 +22,13 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const { inspectionId } = await context.params
+
+  if (!auth.isAdmin) {
+    const access = await canAccessInspection(auth, inspectionId)
+    if (!access.allowed) {
+      return NextResponse.json({ error: access.reason === 'not_found' ? 'Inspection not found.' : 'Forbidden' }, { status: access.reason === 'not_found' ? 404 : 403 })
+    }
+  }
 
   const body = (await request.json()) as {
     currentQuestionIndex?: number

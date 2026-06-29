@@ -1,5 +1,6 @@
 import path from 'path'
 import PDFKit from 'pdfkit'
+import { formatInspectionDate, formatInspectionDateTime, formatInspectionTime } from '@/lib/inspectionTime'
 
 type CompanyBranding = {
   companyName: string
@@ -58,24 +59,15 @@ type SimplePdfInput = {
 const FONT_PATH = path.join(process.cwd(), 'assets', 'fonts', 'DejaVuSans.ttf')
 
 function formatDateTime(value: string | null) {
-  if (!value) return 'N/A'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return 'N/A'
-  return date.toLocaleString('en-GB', { hour12: false })
+  return formatInspectionDateTime(value)
 }
 
 function formatDateOnly(value: string | null) {
-  if (!value) return 'N/A'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return 'N/A'
-  return date.toLocaleDateString('en-GB')
+  return formatInspectionDate(value)
 }
 
 function formatTimeOnly(value: string | null) {
-  if (!value) return 'N/A'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return 'N/A'
-  return date.toLocaleTimeString('en-GB', { hour12: false })
+  return formatInspectionTime(value)
 }
 
 function toDisplay(value: string | null | undefined) {

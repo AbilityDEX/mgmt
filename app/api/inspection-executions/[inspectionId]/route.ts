@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
-import { requireAuth, serverConfigErrorMessage, supabaseAdmin } from '@/lib/admin'
+import { requireAuthContext, serverConfigErrorMessage, supabaseAdmin } from '@/lib/admin'
 import { ensureDefectForFailedInspectionItem } from '@/lib/services/defects'
-import { trackInspectionEvent } from '@/lib/services/inspectionMetrics'
+import { canAccessInspection } from '@/lib/services/inspectionAccess'
+import { trackInspectionEvent as baseTrackInspectionEvent } from '@/lib/services/inspectionMetrics'
 import { completeInspectionWorkflow, InspectionCompletionError } from '@/lib/services/inspectionCompletion'
 
 type RouteContext = {
@@ -29,8 +30,12 @@ function normalizeAnswer(answer: string | null | undefined) {
   return normalized || null
 }
 
+async function trackInspectionEvent(input: Parameters<typeof baseTrackInspectionEvent>[0]) {
+  await baseTrackInspectionEvent(input)
+}
+
 export async function GET(request: Request, context: RouteContext) {
-  const auth = await requireAuth(request)
+  const auth = await requireAuthContext(request)
   if ('error' in auth) {
     return NextResponse.json({ error: auth.error }, { status: auth.status })
   }
@@ -44,6 +49,13 @@ export async function GET(request: Request, context: RouteContext) {
   // VALIDATION: Reject undefined inspection IDs
   if (!inspectionId || inspectionId === 'undefined' || inspectionId === '') {
     return NextResponse.json({ error: `Invalid inspection ID: ${JSON.stringify(inspectionId)}` }, { status: 400 })
+  }
+
+  if (!auth.isAdmin) {
+    const access = await canAccessInspection(auth, inspectionId)
+    if (!access.allowed) {
+      return NextResponse.json({ error: access.reason === 'not_found' ? 'Inspection not found.' : 'Forbidden' }, { status: access.reason === 'not_found' ? 404 : 403 })
+    }
   }
 
   const { data: inspectionData, error: inspectionError } = await supabaseAdmin
@@ -122,7 +134,7 @@ export async function GET(request: Request, context: RouteContext) {
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
-  const auth = await requireAuth(request)
+  const auth = await requireAuthContext(request)
   if ('error' in auth) {
     return NextResponse.json({ error: auth.error }, { status: auth.status })
   }
@@ -132,6 +144,13 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 
   const { inspectionId } = await context.params
+
+  if (!auth.isAdmin) {
+    const access = await canAccessInspection(auth, inspectionId)
+    if (!access.allowed) {
+      return NextResponse.json({ error: access.reason === 'not_found' ? 'Inspection not found.' : 'Forbidden' }, { status: access.reason === 'not_found' ? 404 : 403 })
+    }
+  }
 
   const body = (await request.json()) as
     | {

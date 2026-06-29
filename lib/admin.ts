@@ -30,6 +30,91 @@ export type AuthResult =
   | { userId: string; status: 200 }
   | { error: string; status: number }
 
+export type AuthenticatedUser = {
+  userId: string
+  username: string | null
+  role: string | null
+  isAdmin: boolean
+}
+
+export type AuthContextResult =
+  | ({ status: 200 } & AuthenticatedUser)
+  | { error: string; status: number }
+
+export function isAdminRole(role: string | null | undefined) {
+  const normalized = role?.trim().toLowerCase() ?? ''
+  return normalized === 'admin' || normalized === SYSTEM_ADMIN_ROLE
+}
+
+async function getUserFromBearerToken(request: Request) {
+  if (!supabaseAdmin) {
+    return { error: serverConfigErrorMessage, status: 500 as const }
+  }
+
+  const authHeader = request.headers.get('authorization') ?? ''
+  // Debug: log incoming authorization header for troubleshooting authentication issues
+  try {
+    // Don't log full token in production; this is temporary for local diagnosis
+    // eslint-disable-next-line no-console
+    console.log('[auth] incoming Authorization header (raw):', JSON.stringify(authHeader))
+    // eslint-disable-next-line no-console
+    console.log('[auth] header startsWith "Bearer ":', authHeader.startsWith('Bearer '))
+    // eslint-disable-next-line no-console
+    console.log('[auth] header length:', authHeader.length)
+  } catch (e) {
+    /* ignore logging errors */
+  }
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
+
+  try {
+    // Debug: log extracted token presence
+    // eslint-disable-next-line no-console
+    console.log('[auth] token present:', Boolean(token))
+  } catch (e) {}
+
+  if (!token) {
+    return { error: 'Authentication required', status: 401 as const }
+  }
+
+  const { data: userResponse, error: userError } = await supabaseAdmin.auth.getUser(token)
+  if (userError || !userResponse.user) {
+    return { error: userError?.message ?? 'Invalid authentication token', status: 401 as const }
+  }
+
+  return { user: userResponse.user, status: 200 as const }
+}
+
+export async function requireAuthContext(request: Request): Promise<AuthContextResult> {
+  if (!supabaseAdmin) {
+    return { error: serverConfigErrorMessage, status: 500 }
+  }
+
+  const authUser = await getUserFromBearerToken(request)
+  if ('error' in authUser && typeof authUser.error === 'string') {
+    return authUser
+  }
+
+  const userId = authUser.user.id
+  const { data: profile, error: profileError } = await supabaseAdmin
+    .from('profiles')
+    .select('username, role')
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (profileError) {
+    return { error: profileError.message, status: 500 }
+  }
+
+  const role = (profile?.role as string | null | undefined) ?? null
+  return {
+    status: 200,
+    userId,
+    username: (profile?.username as string | null | undefined) ?? null,
+    role,
+    isAdmin: isAdminRole(role),
+  }
+}
+
 export function isReservedSystemUsername(username: string) {
   return username.trim().toLowerCase() === SYSTEM_ADMIN_USERNAME
 }
@@ -39,23 +124,12 @@ export function isProtectedSystemProfile(profile?: { username?: string | null; r
 }
 
 export async function requireAuth(request: Request): Promise<AuthResult> {
-  if (!supabaseAdmin) {
-    return { error: serverConfigErrorMessage, status: 500 }
+  const auth = await requireAuthContext(request)
+  if ('error' in auth) {
+    return auth
   }
 
-  const authHeader = request.headers.get('authorization') ?? ''
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
-
-  if (!token) {
-    return { error: 'Authentication required', status: 401 }
-  }
-
-  const { data: userResponse, error: userError } = await supabaseAdmin.auth.getUser(token)
-  if (userError || !userResponse.user) {
-    return { error: 'Invalid authentication token', status: 401 }
-  }
-
-  return { userId: userResponse.user.id, status: 200 }
+  return { userId: auth.userId, status: 200 }
 }
 
 export async function requireAdmin(request: Request): Promise<AuthResult> {
@@ -72,35 +146,16 @@ export async function requireAdmin(request: Request): Promise<AuthResult> {
     }
   }
 
-  const authHeader = request.headers.get('authorization') ?? ''
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
-
-  if (!token) {
-    return { error: 'Authentication required', status: 401 }
+  const auth = await requireAuthContext(request)
+  if ('error' in auth) {
+    return auth
   }
 
-  const { data: userResponse, error: userError } = await supabaseAdmin.auth.getUser(token)
-  if (userError || !userResponse.user) {
-    return { error: userError?.message ?? 'Invalid authentication token', status: 401 }
-  }
-
-  const userId = userResponse.user.id
-  const { data: profile, error: profileError } = await supabaseAdmin
-    .from('profiles')
-    .select('role')
-    .eq('user_id', userId)
-    .maybeSingle()
-
-  if (profileError) {
-    return { error: profileError.message, status: 500 }
-  }
-
-  const allowedAdminRoles = ['admin', SYSTEM_ADMIN_ROLE]
-  if (!profile?.role || !allowedAdminRoles.includes(profile.role.toLowerCase())) {
+  if (!auth.isAdmin) {
     return { error: 'Admin rights required', status: 403 }
   }
 
-  return { userId, status: 200 }
+  return { userId: auth.userId, status: 200 }
 }
 
 export async function ensureSystemSuperAdmin() {

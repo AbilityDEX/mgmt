@@ -1,4 +1,5 @@
 import { serverConfigErrorMessage, supabaseAdmin } from '@/lib/admin'
+import { INSPECTION_TIMEZONE, normalizeInspectionTimezone } from '@/lib/inspectionTime'
 import type { CompanySettings } from '@/lib/types/release1'
 
 function mapCompanySettingsRow(row: Record<string, unknown>): CompanySettings {
@@ -10,10 +11,15 @@ function mapCompanySettingsRow(row: Record<string, unknown>): CompanySettings {
     companyName: (row.company_name as string) ?? 'MGMT Inspect',
     archiveEmail: (orgSettings?.archiveEmail as string | null) ?? (row.archive_email as string | null) ?? null,
     supportEmail: (orgSettings?.supportEmail as string | null) ?? null,
-    timezone: (orgSettings?.timezone as string | null) ?? null,
+    timezone: normalizeInspectionTimezone(orgSettings?.timezone as string | null),
     dateFormat: (orgSettings?.dateFormat as string | null) ?? null,
     timeFormat: (orgSettings?.timeFormat as string | null) ?? null,
     defaultReplyTo: (smtpConfig?.replyToEmail as string | null) ?? null,
+    dailyReminderSendTime: (orgSettings?.dailyReminderSendTime as string | null) ?? null,
+    dueSoonWarningDays: (orgSettings?.dueSoonWarningDays as number | null) ?? null,
+    enableDueSoon: (orgSettings?.enableDueSoon as boolean | null) ?? null,
+    enableEmployeeReminderEmails: (orgSettings?.enableEmployeeReminderEmails as boolean | null) ?? null,
+    enableManagementOverdueNotifications: (orgSettings?.enableManagementOverdueNotifications as boolean | null) ?? null,
     logoUrl: (row.logo_url as string | null) ?? null,
     address: (row.address as string | null) ?? null,
     telephone: (row.telephone as string | null) ?? null,
@@ -52,6 +58,11 @@ export async function updateCompanySettings(input: {
   reportFooter?: string | null
   reportPrimaryColor?: string
   reportAccentColor?: string
+  dailyReminderSendTime?: string | null
+  dueSoonWarningDays?: number | null
+  enableDueSoon?: boolean | null
+  enableEmployeeReminderEmails?: boolean | null
+  enableManagementOverdueNotifications?: boolean | null
 }) {
   if (!supabaseAdmin) throw new Error(serverConfigErrorMessage)
 
@@ -65,6 +76,56 @@ export async function updateCompanySettings(input: {
   if (input.reportFooter !== undefined) updates.report_footer = input.reportFooter?.trim() || null
   if (input.reportPrimaryColor !== undefined) updates.report_primary_color = input.reportPrimaryColor.trim() || '#0f766e'
   if (input.reportAccentColor !== undefined) updates.report_accent_color = input.reportAccentColor.trim() || '#0f172a'
+
+  if (
+    input.dailyReminderSendTime !== undefined ||
+    input.dueSoonWarningDays !== undefined ||
+    input.enableDueSoon !== undefined ||
+    input.enableEmployeeReminderEmails !== undefined ||
+    input.enableManagementOverdueNotifications !== undefined
+  ) {
+    const { data: currentRow } = await supabaseAdmin
+      .from('company_settings')
+      .select('id, smtp_config')
+      .limit(1)
+      .maybeSingle()
+
+    const currentSmtpConfig = (currentRow?.smtp_config as Record<string, unknown> | null) ?? null
+    const currentOrgSettings = (currentSmtpConfig?.orgSettings as Record<string, unknown> | null) ?? null
+
+    const orgSettings = {
+      archiveEmail: (currentOrgSettings?.archiveEmail as string | null) ?? null,
+      supportEmail: (currentOrgSettings?.supportEmail as string | null) ?? null,
+      timezone: INSPECTION_TIMEZONE,
+      dateFormat: (currentOrgSettings?.dateFormat as string | null) ?? null,
+      timeFormat: (currentOrgSettings?.timeFormat as string | null) ?? null,
+      dailyReminderSendTime:
+        input.dailyReminderSendTime !== undefined
+          ? input.dailyReminderSendTime?.trim() || null
+          : (currentOrgSettings?.dailyReminderSendTime as string | null) ?? '07:00',
+      dueSoonWarningDays:
+        input.dueSoonWarningDays !== undefined
+          ? Math.max(0, Number(input.dueSoonWarningDays ?? 2))
+          : Number(currentOrgSettings?.dueSoonWarningDays ?? 2),
+      enableDueSoon:
+        input.enableDueSoon !== undefined
+          ? Boolean(input.enableDueSoon)
+          : Boolean(currentOrgSettings?.enableDueSoon ?? true),
+      enableEmployeeReminderEmails:
+        input.enableEmployeeReminderEmails !== undefined
+          ? Boolean(input.enableEmployeeReminderEmails)
+          : Boolean(currentOrgSettings?.enableEmployeeReminderEmails ?? true),
+      enableManagementOverdueNotifications:
+        input.enableManagementOverdueNotifications !== undefined
+          ? Boolean(input.enableManagementOverdueNotifications)
+          : Boolean(currentOrgSettings?.enableManagementOverdueNotifications ?? true),
+    }
+
+    updates.smtp_config = {
+      ...(currentSmtpConfig ?? {}),
+      orgSettings,
+    }
+  }
 
   const { data: existing } = await supabaseAdmin
     .from('company_settings')

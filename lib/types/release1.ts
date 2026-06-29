@@ -8,7 +8,7 @@ export type ScheduleFrequency =
   | 'Annually'
   | 'Custom'
 
-export type ScheduleTrafficStatus = 'On Time' | 'Due Soon' | 'Overdue' | 'Paused'
+export type ScheduleTrafficStatus = 'Completed' | 'Due Soon' | 'Due' | 'Overdue'
 
 export type EmailRecipientType = 'to' | 'cc' | 'bcc'
 
@@ -32,6 +32,11 @@ export type CompanySettings = {
   dateFormat?: string | null
   timeFormat?: string | null
   defaultReplyTo?: string | null
+  dailyReminderSendTime?: string | null
+  dueSoonWarningDays?: number | null
+  enableDueSoon?: boolean | null
+  enableEmployeeReminderEmails?: boolean | null
+  enableManagementOverdueNotifications?: boolean | null
   logoUrl: string | null
   address: string | null
   telephone: string | null

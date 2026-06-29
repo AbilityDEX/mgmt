@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
-import { requireAdmin, requireAuth, serverConfigErrorMessage, supabaseAdmin } from '@/lib/admin'
+import { requireAdmin, requireAuthContext, serverConfigErrorMessage, supabaseAdmin } from '@/lib/admin'
+import { canAccessMachine } from '@/lib/services/inspectionAccess'
 import { archiveInspectionAndSendEmail } from '@/lib/services/archivePipeline'
+import { userActivityFallback } from '@/lib/services/userActivityFallback'
 
 export async function GET(request: Request) {
   const auth = await requireAdmin(request)
@@ -11,6 +13,9 @@ export async function GET(request: Request) {
   if (!supabaseAdmin) {
     return NextResponse.json({ error: serverConfigErrorMessage }, { status: 500 })
   }
+
+  // Ensure daily maintenance has completed
+  await userActivityFallback.triggerMaintenanceFallbackIfNeeded(supabaseAdmin, false)
 
   const url = new URL(request.url)
   const failedOnly = url.searchParams.get('failed') === 'true'
@@ -119,7 +124,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const auth = await requireAuth(request)
+  const auth = await requireAuthContext(request)
   if ('error' in auth) {
     return NextResponse.json({ error: auth.error }, { status: auth.status })
   }
@@ -139,6 +144,13 @@ export async function POST(request: Request) {
       { error: 'machine_id, operator_name, and checklist are required' },
       { status: 400 }
     )
+  }
+
+  if (!auth.isAdmin) {
+    const access = await canAccessMachine(auth, body.machine_id)
+    if (!access.allowed) {
+      return NextResponse.json({ error: access.reason === 'not_found' ? 'Machine not found.' : 'Forbidden' }, { status: access.reason === 'not_found' ? 404 : 403 })
+    }
   }
 
   const { data, error } = await supabaseAdmin

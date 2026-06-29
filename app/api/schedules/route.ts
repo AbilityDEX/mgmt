@@ -1,13 +1,15 @@
 import { NextResponse } from 'next/server'
-import { requireAdmin, requireAuth, serverConfigErrorMessage, supabaseAdmin } from '@/lib/admin'
+import { requireAdmin, requireAuthContext, serverConfigErrorMessage, supabaseAdmin } from '@/lib/admin'
+import { addLondonDays, getLondonDateKey } from '@/lib/inspectionTime'
 import {
-  calculateNextDue,
   ensureScheduleForMachineTemplate,
   getScheduleOverview,
   runInspectionScheduler,
   scheduleFrequencies,
   ScheduleFrequency,
 } from '@/lib/services/inspectionScheduling'
+import { canAccessMachine } from '@/lib/services/inspectionAccess'
+import { userActivityFallback } from '@/lib/services/userActivityFallback'
 
 const frequencies = scheduleFrequencies
 
@@ -16,7 +18,7 @@ function isFrequency(value: string): value is ScheduleFrequency {
 }
 
 export async function GET(request: Request) {
-  const auth = await requireAuth(request)
+  const auth = await requireAuthContext(request)
   if ('error' in auth) {
     return NextResponse.json({ error: auth.error }, { status: auth.status })
   }
@@ -25,22 +27,61 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: serverConfigErrorMessage }, { status: 500 })
   }
 
+  // Ensure daily maintenance has completed
+  await userActivityFallback.triggerMaintenanceFallbackIfNeeded(supabaseAdmin, false)
+
   const url = new URL(request.url)
   const machineId = url.searchParams.get('machine_id')?.trim() ?? ''
 
   try {
-    await runInspectionScheduler()
     const overview = await getScheduleOverview()
 
     if (machineId) {
+      if (!auth.isAdmin) {
+        const access = await canAccessMachine(auth, machineId)
+        if (!access.allowed) {
+          return NextResponse.json({ error: access.reason === 'not_found' ? 'Machine not found.' : 'Forbidden' }, { status: access.reason === 'not_found' ? 404 : 403 })
+        }
+      }
+
       const schedules = overview.rows.filter((row) => row.machineId === machineId)
       return NextResponse.json({ frequencies, schedules })
     }
 
+    const allowedMachineIds = auth.isAdmin
+      ? null
+      : new Set(
+          (await supabaseAdmin
+            .from('machines')
+            .select('id')
+            .eq('assigned_user', auth.username ?? ''))
+            .data?.map((row) => row.id as string) ?? []
+        )
+
+    const scopedRows = allowedMachineIds
+      ? overview.rows.filter((row) => allowedMachineIds.has(row.machineId))
+      : overview.rows
+
+    const tomorrowKey = getLondonDateKey(addLondonDays(new Date(), 1))
+
+    const scopedBuckets = {
+      dueToday: overview.dueBuckets.dueToday.filter((row) => !allowedMachineIds || allowedMachineIds.has(row.machineId)),
+      dueThisWeek: overview.dueBuckets.dueThisWeek.filter((row) => !allowedMachineIds || allowedMachineIds.has(row.machineId)),
+      overdue: overview.dueBuckets.overdue.filter((row) => !allowedMachineIds || allowedMachineIds.has(row.machineId)),
+      upcoming: overview.dueBuckets.upcoming.filter((row) => !allowedMachineIds || allowedMachineIds.has(row.machineId)),
+    }
+
     return NextResponse.json({
       frequencies,
-      board: overview.dueBuckets,
-      widgets: overview.widgets,
+      board: scopedBuckets,
+      widgets: {
+        ...overview.widgets,
+        dueToday: scopedBuckets.dueToday.length,
+        dueTomorrow: scopedRows.filter((row) => getLondonDateKey(new Date(row.nextDue)) === tomorrowKey).length,
+        overdue: scopedBuckets.overdue.length,
+        upcomingThisWeek: scopedBuckets.dueThisWeek.length,
+        totalOutstanding: scopedBuckets.dueToday.length + scopedBuckets.dueThisWeek.length + scopedBuckets.overdue.length,
+      },
     })
   } catch (error) {
     return NextResponse.json(
@@ -161,7 +202,7 @@ export async function PATCH(request: Request) {
 
   const { data: existing, error: existingError } = await supabaseAdmin
     .from('inspection_schedules')
-    .select('id, frequency, interval_value, custom_cron')
+    .select('id, machine_template_id, frequency, interval_value, custom_cron')
     .eq('id', scheduleId)
     .maybeSingle()
 
@@ -185,17 +226,18 @@ export async function PATCH(request: Request) {
   }
 
   try {
-    updates.next_due = calculateNextDue({
+    const refreshed = await ensureScheduleForMachineTemplate({
+      machineTemplateId: existing.machine_template_id as string,
       frequency: nextFrequency,
       intervalValue: nextInterval,
       customCron: nextCron,
-      fromDate: new Date(),
+      active: body.active ?? true,
     })
 
     const { data: updated, error: updateError } = await supabaseAdmin
       .from('inspection_schedules')
       .update(updates)
-      .eq('id', scheduleId)
+      .eq('id', refreshed.scheduleId)
       .select('id, next_due, active')
       .single()
 

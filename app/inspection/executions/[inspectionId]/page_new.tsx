@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
+import { formatInspectionDateTime, formatInspectionTime } from '@/lib/inspectionTime'
 import { supabaseClient } from '@/lib/supabase'
 import InspectionQuestion from '@/components/InspectionQuestion'
 import type { InspectionItem as InspectionItemType, Inspection } from '@/lib/data/inspections'
@@ -257,7 +258,7 @@ export default function InspectionExecutionPage() {
               <div className="rounded-2xl bg-slate-800 px-3 py-2 text-xs sm:text-sm sm:col-span-2">
                 <span className="text-slate-400">Started:</span>
                 <span className="ml-1 font-semibold text-slate-100">
-                  {new Date(inspection.startedAt).toLocaleString()}
+                  {formatInspectionDateTime(inspection.startedAt)}
                 </span>
               </div>
             )}
@@ -270,7 +271,7 @@ export default function InspectionExecutionPage() {
               {autoSaving ? (
                 <span>Saving...</span>
               ) : lastAutoSaveTime ? (
-                <span>Autosaved {new Date(lastAutoSaveTime).toLocaleTimeString()}</span>
+                <span>Autosaved {formatInspectionTime(lastAutoSaveTime)}</span>
               ) : (
                 <span>Autosave enabled</span>
               )}

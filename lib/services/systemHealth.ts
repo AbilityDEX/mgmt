@@ -4,8 +4,9 @@ import crypto from 'crypto'
 import { pathToFileURL } from 'url'
 
 import { serverConfigErrorMessage, supabaseAdmin, SYSTEM_ADMIN_EMAIL } from '@/lib/admin'
+import { addLondonDays, formatInspectionDateTime, getLondonDateKey, getLondonDateTimeParts, startOfLondonDay } from '@/lib/inspectionTime'
 import { archiveInspectionAndSendEmail } from '@/lib/services/archivePipeline'
-import { repairInspectionScheduleCoverage, runInspectionScheduler, calculateNextDue } from '@/lib/services/inspectionScheduling'
+import { repairInspectionScheduleCoverage, runInspectionScheduler, calculateNextDue, getScheduleOverview } from '@/lib/services/inspectionScheduling'
 import { createSystemHealthPDF } from '@/lib/services/pdf'
 import { sendSmtpTestEmail, verifySmtpConnection } from '@/lib/services/smtpConfig'
 import { getInspectionEngineMetrics } from '@/lib/services/inspectionMetrics'
@@ -37,8 +38,7 @@ type FrequencyValidation = {
   checks: {
     nextDueCalculation: boolean
     reminderCalculation: boolean
-    gracePeriodCalculation: boolean
-    midnightTransition: boolean
+    ukTimePreserved: boolean
     lockUnlockBehaviour: boolean
   }
 }
@@ -62,6 +62,28 @@ type EmailValidation = {
   }
 }
 
+type SchedulerDiagnosticRow = {
+  scheduleId: string
+  machineId: string
+  machineName: string
+  templateName: string
+  currentTime: string
+  inspectionTime: string
+  currentStatus: string
+  dueSoonTime: string | null
+  dueTime: string
+  overdueTime: string
+  lockUntil: string
+  reminderQueued: boolean
+  reminderSent: boolean
+  nextReminderTime: string | null
+  recipientCount: number
+  recipientSource: string
+  schedulerDecision: string
+  apiDecision: string
+  dbDecision: string
+}
+
 type SystemHealthStatus = {
   generatedAt: string
   cards: {
@@ -76,6 +98,7 @@ type SystemHealthStatus = {
   fullReport: FullCheckItem[]
   releaseValidation: ReleaseValidationStage[]
   schedulerValidation: FrequencyValidation[]
+  schedulerDiagnostics: SchedulerDiagnosticRow[]
   pdfValidation: PdfValidation
   emailValidation: EmailValidation
   repairs: {
@@ -98,6 +121,101 @@ type SystemHealthStatus = {
     percentage: number
     release1Ready: boolean
   }
+}
+
+export async function buildSchedulerDiagnostics(now = new Date()): Promise<SchedulerDiagnosticRow[]> {
+  if (!supabaseAdmin) throw new Error(serverConfigErrorMessage)
+
+  const overview = await getScheduleOverview(now)
+  const rows = overview.rows.slice(0, 12)
+  if (rows.length === 0) return []
+
+  const machineIds = Array.from(new Set(rows.map((row) => row.machineId)))
+  const inspectionIds = rows
+    .map((row) => row.openInspectionId ?? row.lastInspectionId)
+    .filter((id): id is string => Boolean(id))
+
+  const machinesResult = await supabaseAdmin
+    .from('machines')
+    .select('id, assigned_user, status')
+    .in('id', machineIds)
+
+  const machines = (machinesResult.data ?? []) as Array<{ id: string; assigned_user: string | null; status: string | null }>
+  const assignedUsernames = Array.from(new Set(machines.map((machine) => machine.assigned_user).filter((value): value is string => Boolean(value))))
+
+  const profilesResult = assignedUsernames.length > 0
+    ? await supabaseAdmin
+        .from('profiles')
+        .select('username, email, receive_inspection_reminder_emails')
+        .in('username', assignedUsernames)
+    : { data: [] as Array<{ username: string; email: string | null; receive_inspection_reminder_emails: boolean | null }> }
+
+  const queueResult = inspectionIds.length > 0
+    ? await supabaseAdmin
+        .from('email_queue')
+        .select('inspection_id, status, next_retry_at')
+        .in('inspection_id', inspectionIds)
+    : { data: [] as Array<{ inspection_id: string; status: string; next_retry_at: string | null }> }
+
+  const historyResult = inspectionIds.length > 0
+    ? await supabaseAdmin
+        .from('inspection_email_history')
+        .select('inspection_id, status')
+        .in('inspection_id', inspectionIds)
+    : { data: [] as Array<{ inspection_id: string; status: string }> }
+
+  const machineById = new Map(machines.map((machine) => [machine.id, machine]))
+  const profileByUsername = new Map((profilesResult.data ?? []).map((profile) => [profile.username, profile]))
+
+  const queueByInspection = new Map<string, Array<{ status: string; next_retry_at: string | null }>>()
+  for (const row of queueResult.data ?? []) {
+    const inspectionId = String(row.inspection_id)
+    const list = queueByInspection.get(inspectionId) ?? []
+    list.push({ status: String(row.status), next_retry_at: (row.next_retry_at as string | null) ?? null })
+    queueByInspection.set(inspectionId, list)
+  }
+
+  const historyByInspection = new Map<string, string[]>()
+  for (const row of historyResult.data ?? []) {
+    const inspectionId = String(row.inspection_id)
+    const list = historyByInspection.get(inspectionId) ?? []
+    list.push(String(row.status))
+    historyByInspection.set(inspectionId, list)
+  }
+
+  return rows.map((row) => {
+    const linkedInspectionId = row.openInspectionId ?? row.lastInspectionId
+    const queueRows = linkedInspectionId ? (queueByInspection.get(linkedInspectionId) ?? []) : []
+    const historyRows = linkedInspectionId ? (historyByInspection.get(linkedInspectionId) ?? []) : []
+    const machine = machineById.get(row.machineId)
+    const profile = machine?.assigned_user ? profileByUsername.get(machine.assigned_user) : undefined
+    const nextReminderTime = queueRows
+      .map((item) => item.next_retry_at)
+      .filter((value): value is string => Boolean(value))
+      .sort()[0] ?? null
+
+    return {
+      scheduleId: row.scheduleId,
+      machineId: row.machineId,
+      machineName: row.machineName,
+      templateName: row.templateName,
+      currentTime: row.diagnostics.currentTime,
+      inspectionTime: row.diagnostics.inspectionTime,
+      currentStatus: machine?.status ?? row.diagnostics.currentStatus,
+      dueSoonTime: row.diagnostics.dueSoonTime,
+      dueTime: row.diagnostics.dueTime,
+      overdueTime: row.diagnostics.overdueTime,
+      lockUntil: row.diagnostics.lockUntil,
+      reminderQueued: queueRows.some((item) => item.status === 'pending' || item.status === 'failed'),
+      reminderSent: historyRows.includes('sent'),
+      nextReminderTime,
+      recipientCount: profile?.email && profile.receive_inspection_reminder_emails ? 1 : 0,
+      recipientSource: profile?.email ? 'assigned_user_profile' : 'none',
+      schedulerDecision: row.diagnostics.schedulerDecision,
+      apiDecision: row.diagnostics.apiDecision,
+      dbDecision: row.diagnostics.dbDecision,
+    }
+  })
 }
 
 const REQUIRED_TABLES = [
@@ -306,8 +424,9 @@ async function checkSchedulingCard() {
 
 async function checkInspectionCard() {
   if (!supabaseAdmin) throw new Error(serverConfigErrorMessage)
-  const started = await supabaseAdmin.from('inspections').select('*', { head: true, count: 'exact' }).gte('started_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString())
-  const completed = await supabaseAdmin.from('inspections').select('*', { head: true, count: 'exact' }).eq('status', 'Completed').gte('completed_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString())
+  const londonDayStart = startOfLondonDay(new Date()).toISOString()
+  const started = await supabaseAdmin.from('inspections').select('*', { head: true, count: 'exact' }).gte('started_at', londonDayStart)
+  const completed = await supabaseAdmin.from('inspections').select('*', { head: true, count: 'exact' }).eq('status', 'Completed').gte('completed_at', londonDayStart)
   const inProgress = await supabaseAdmin.from('inspections').select('*', { head: true, count: 'exact' }).eq('status', 'In Progress')
   const metrics = await getInspectionEngineMetrics().catch(() => ({
     failedInspectionStarts: 0,
@@ -381,7 +500,10 @@ async function checkArchiveCard() {
   const card: HealthCard = {
     status: toState(!hasCurrentArchiveEvidence, Boolean(queue.count ?? 0)),
     metrics: {
-      pdfsGeneratedToday: latestArchive.data?.generated_at && String(latestArchive.data.generated_at).startsWith(new Date().toISOString().slice(0, 10)) ? 1 : 0,
+      pdfsGeneratedToday:
+        latestArchive.data?.generated_at && getLondonDateKey(new Date(latestArchive.data.generated_at as string)) === getLondonDateKey(new Date())
+          ? 1
+          : 0,
       failedPdfGenerations: hasCurrentArchiveEvidence ? 0 : 1,
       archiveQueue: queue.count ?? 0,
       archiveFailures: hasCurrentArchiveEvidence ? 0 : 1,
@@ -549,7 +671,7 @@ async function buildReleaseValidation() {
     stage: 'Inspection Locked',
     status: lockTimestampValid ? 'PASS' : 'FAILED',
     details: lockTimestampValid
-      ? `${currentlyLocked ? 'locked' : 'unlock-ready'} @ ${lockDue?.toISOString()}`
+      ? `${currentlyLocked ? 'locked' : 'unlock-ready'} @ ${formatInspectionDateTime(lockDue)}`
       : 'No valid next_due available.',
   })
 
@@ -574,11 +696,12 @@ async function buildReleaseValidation() {
     details: nextDueAdvanced ? String(scheduleAdvanced.data?.next_due) : 'next_due was not advanced from completion.',
   })
 
-  const midnightProbe = calculateNextDue({ frequency: 'Daily', fromDate: new Date(), intervalValue: 1 })
+  const londonProbe = calculateNextDue({ frequency: 'Daily', fromDate: new Date(), intervalValue: 1 })
+  const londonProbeParts = getLondonDateTimeParts(londonProbe)
   stages.push({
-    stage: 'Midnight Transition',
-    status: midnightProbe.getUTCHours() === 0 && midnightProbe.getUTCMinutes() === 0 ? 'PASS' : 'FAILED',
-    details: midnightProbe.toISOString(),
+    stage: 'UK Due Time Transition',
+    status: londonProbeParts.hour === 9 && londonProbeParts.minute === 0 ? 'PASS' : 'FAILED',
+    details: `${formatInspectionDateTime(londonProbe)} Europe/London`,
   })
 
   const emailLog = completed.data?.id
@@ -665,13 +788,12 @@ async function buildFrequencyValidation(): Promise<FrequencyValidation[]> {
 
   const latestMachine = await supabaseAdmin
     .from('machines')
-    .select('inspection_deadline, reminder_days_before_due, grace_period, custom_interval_value')
+    .select('inspection_deadline, reminder_days_before_due, custom_interval_value')
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()
 
   const reminder = Math.max(0, Number(latestMachine.data?.reminder_days_before_due ?? 0))
-  const grace = Math.max(0, Number(latestMachine.data?.grace_period ?? 0))
   const customInterval = Math.max(1, Number(latestMachine.data?.custom_interval_value ?? 1))
   const baseDate = new Date()
 
@@ -683,23 +805,21 @@ async function buildFrequencyValidation(): Promise<FrequencyValidation[]> {
       fromDate: baseDate,
       intervalValue: frequency === 'Custom' ? customInterval : 1,
       customCron: frequency === 'Custom' ? null : null,
+      inspectionTime: (latestMachine.data?.inspection_deadline as string | null) ?? '09:00',
     })
 
-    const reminderDate = new Date(nextDue)
-    reminderDate.setUTCDate(reminderDate.getUTCDate() - reminder)
-    const graceCutoff = new Date(nextDue)
-    graceCutoff.setUTCDate(graceCutoff.getUTCDate() + grace)
+    const reminderDate = addLondonDays(nextDue, -reminder)
+    const nextDueParts = getLondonDateTimeParts(nextDue)
 
     const checks = {
       nextDueCalculation: !Number.isNaN(nextDue.getTime()) && nextDue > baseDate,
       reminderCalculation: !Number.isNaN(reminderDate.getTime()),
-      gracePeriodCalculation: !Number.isNaN(graceCutoff.getTime()) && graceCutoff >= nextDue,
-      midnightTransition: nextDue.getUTCHours() === 0 && nextDue.getUTCMinutes() === 0,
+      ukTimePreserved: nextDueParts.hour === 9 && nextDueParts.minute === 0,
       lockUnlockBehaviour: nextDue > baseDate || baseDate >= nextDue,
     }
 
-    const status = checks.nextDueCalculation && checks.reminderCalculation && checks.gracePeriodCalculation && checks.lockUnlockBehaviour
-      ? checks.midnightTransition
+    const status = checks.nextDueCalculation && checks.reminderCalculation && checks.lockUnlockBehaviour
+      ? checks.ukTimePreserved
         ? 'PASS'
         : 'WARNING'
       : 'FAILED'
@@ -919,9 +1039,10 @@ export async function runSystemHealthSuite(): Promise<SystemHealthStatus> {
     },
   ]
 
-  const [releaseValidation, schedulerValidation, pdfValidation, emailValidation] = await Promise.all([
+  const [releaseValidation, schedulerValidation, schedulerDiagnostics, pdfValidation, emailValidation] = await Promise.all([
     buildReleaseValidation(),
     buildFrequencyValidation(),
+    buildSchedulerDiagnostics(),
     buildPdfValidation(),
     buildEmailValidation(),
   ])
@@ -945,7 +1066,7 @@ export async function runSystemHealthSuite(): Promise<SystemHealthStatus> {
     name: 'Scheduler Frequency Validation',
     status: schedulerValidation.every((row) => row.status === 'PASS') ? 'PASS' : 'FAILED',
     details: schedulerValidation.every((row) => row.status === 'PASS')
-      ? 'All frequencies pass midnight transition and lock checks.'
+      ? 'All frequencies preserve the configured UK inspection time and pass lock checks.'
       : 'One or more frequencies failed validation.',
   })
 
@@ -963,6 +1084,7 @@ export async function runSystemHealthSuite(): Promise<SystemHealthStatus> {
     fullReport,
     releaseValidation,
     schedulerValidation,
+    schedulerDiagnostics,
     pdfValidation,
     emailValidation,
     repairs: {

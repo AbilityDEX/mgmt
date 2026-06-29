@@ -31,7 +31,7 @@ export default function Home() {
 
       const { data: profile, error: profileError } = await supabaseClient
         .from('profiles')
-        .select('full_name')
+        .select('full_name, role')
         .eq('user_id', session.user.id)
         .maybeSingle()
 
@@ -48,6 +48,7 @@ export default function Home() {
       setCurrentUser({
         id: session.user.id,
         name: profile?.full_name || session.user.email || '',
+        role: profile?.role || '',
       })
 
       router.replace('/dashboard')
@@ -90,7 +91,7 @@ export default function Home() {
 
     const { data: profile, error: profileError } = await supabaseClient
       .from('profiles')
-      .select('full_name')
+      .select('full_name, role')
       .eq('user_id', user.id)
       .maybeSingle()
 
@@ -102,6 +103,7 @@ export default function Home() {
     setCurrentUser({
       id: user.id,
       name: profile?.full_name || user.email || '',
+      role: profile?.role || '',
     })
 
     router.replace('/dashboard')

@@ -32,6 +32,11 @@ export async function PATCH(request: Request) {
     timezone?: string | null
     dateFormat?: string | null
     timeFormat?: string | null
+    dailyReminderSendTime?: string | null
+    dueSoonWarningDays?: number | null
+    enableDueSoon?: boolean | null
+    enableEmployeeReminderEmails?: boolean | null
+    enableManagementOverdueNotifications?: boolean | null
   }
 
   const hasSmtpFields =
@@ -49,7 +54,12 @@ export async function PATCH(request: Request) {
     body.supportEmail !== undefined ||
     body.timezone !== undefined ||
     body.dateFormat !== undefined ||
-    body.timeFormat !== undefined
+    body.timeFormat !== undefined ||
+    body.dailyReminderSendTime !== undefined ||
+    body.dueSoonWarningDays !== undefined ||
+    body.enableDueSoon !== undefined ||
+    body.enableEmployeeReminderEmails !== undefined ||
+    body.enableManagementOverdueNotifications !== undefined
 
   if (hasSmtpFields) {
     const result = await saveSmtpConfig({
@@ -75,6 +85,11 @@ export async function PATCH(request: Request) {
       timezone: body.timezone ?? null,
       dateFormat: body.dateFormat ?? null,
       timeFormat: body.timeFormat ?? null,
+      dailyReminderSendTime: body.dailyReminderSendTime ?? null,
+      dueSoonWarningDays: body.dueSoonWarningDays ?? null,
+      enableDueSoon: body.enableDueSoon ?? null,
+      enableEmployeeReminderEmails: body.enableEmployeeReminderEmails ?? null,
+      enableManagementOverdueNotifications: body.enableManagementOverdueNotifications ?? null,
     })
 
     if (!orgResult.ok) {

@@ -2,6 +2,7 @@ import { serverConfigErrorMessage, supabaseAdmin } from '@/lib/admin'
 import { resolveCompanyName, resolveEmailEnvelope } from '@/lib/services/emailConfig'
 import { textToHtmlParagraphs } from '@/lib/services/emailMessageTemplates'
 import { getCompanySettings } from '@/lib/services/companySettings'
+import { sendManagementAlert } from '@/lib/services/managementNotifications'
 import { getSmtpTransport } from '@/lib/services/smtpConfig'
 
 type EmailQueueRow = {
@@ -138,6 +139,28 @@ export async function processEmailQueue(limit = 100) {
           error_message: message,
         })
         .eq('id', row.id)
+
+      if (nextAttempt >= 5) {
+        const { data: machineMeta } = await supabaseAdmin
+          .from('inspections')
+          .select('machine_id, machines(name, area)')
+          .eq('id', row.inspection_id)
+          .maybeSingle()
+
+        const machine = Array.isArray(machineMeta?.machines)
+          ? machineMeta?.machines[0]
+          : machineMeta?.machines
+
+        await sendManagementAlert({
+          event: 'retry_queue_failed',
+          machineId: (machineMeta?.machine_id as string | null) ?? null,
+          machineName: (machine?.name as string | null) ?? 'Unknown Machine',
+          machineArea: (machine?.area as string | null) ?? null,
+          reference: row.inspection_id,
+          subject: 'Retry Queue Failed',
+          details: `Email queue item ${row.id} reached max retries and was abandoned. Last error: ${message}`,
+        }).catch(() => undefined)
+      }
 
       await supabaseAdmin
         .from('inspection_email_history')

@@ -1,5 +1,5 @@
 import { runInspectionScheduler } from '@/lib/services/inspectionScheduling'
-import { sendScheduledReminders } from '@/lib/services/reminders'
+import { queueDailyReminderEmails, sendScheduledReminders } from '@/lib/services/reminders'
 import { processEmailQueue } from '@/lib/services/emailQueue'
 import { getRetentionSettings } from '@/lib/services/retention'
 import { retryFailedArchiveDeliveries } from '@/lib/services/archivePipeline'
@@ -14,7 +14,10 @@ export async function runSchedulerCadence(cadence: SchedulerCadence, now = new D
   }
 
   if (cadence === 'midnight' || cadence === 'all') {
-    output.midnight = await runInspectionScheduler(now)
+    output.midnight = {
+      scheduler: await runInspectionScheduler(now),
+      remindersQueued: await queueDailyReminderEmails(now),
+    }
   }
 
   if (cadence === 'morning' || cadence === 'all') {

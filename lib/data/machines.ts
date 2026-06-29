@@ -1,4 +1,4 @@
-export type MachineStatus = 'Not Started' | 'Completed' | 'Overdue' | 'In Progress'
+export type MachineStatus = 'Not Started' | 'Completed' | 'Overdue' | 'In Progress' | 'Due' | 'Due Soon'
 
 export type InspectionFrequency = 'Daily' | 'Weekly' | 'Fortnightly' | 'Monthly' | 'Quarterly' | 'Six Monthly' | 'Annually' | 'Custom'
 
@@ -15,7 +15,6 @@ export interface Machine {
   inspectionDeadline: string
   inspectionFrequency?: InspectionFrequency | null
   reminderDaysBeforeDue?: number
-  gracePeriod?: number
   autoGenerateInspection?: boolean
   customIntervalValue?: number | null
   customIntervalUnit?: 'Days' | 'Weeks' | 'Months' | null

@@ -5,6 +5,12 @@ import type {
   EmailRecipientType,
 } from '@/lib/types/release1'
 
+export type ManagementNotificationEvent =
+  | 'inspection_completed'
+  | 'inspection_overdue'
+  | 'archive_delivery_failed'
+  | 'retry_queue_failed'
+
 function mapRecipient(row: Record<string, unknown>): EmailDistributionRecipient {
   return {
     id: row.id as string,
@@ -120,4 +126,38 @@ export function recipientMatchesInspection(params: {
   if (deliveryScope === 'failed_only') return overallResult === 'FAIL'
   if (deliveryScope === 'defects_only') return hasDefects
   return false
+}
+
+export function resolveManagementRecipients(params: {
+  recipients: EmailDistributionRecipient[]
+  event: ManagementNotificationEvent
+  machineId?: string | null
+  machineArea?: string | null
+  hasDefects?: boolean
+  overallResult?: 'PASS' | 'FAIL' | 'INCOMPLETE'
+}) {
+  const machineId = params.machineId ?? null
+  const machineArea = (params.machineArea ?? '').trim().toLowerCase()
+
+  return params.recipients.filter((recipient) => {
+    if (!recipient.enabled) return false
+
+    if (recipient.machineFilter && machineId && recipient.machineFilter !== machineId) return false
+    if (recipient.machineFilter && !machineId) return false
+
+    if (recipient.departmentFilter) {
+      if (!machineArea) return false
+      if (!machineArea.includes(recipient.departmentFilter.trim().toLowerCase())) return false
+    }
+
+    if (params.event === 'inspection_completed') {
+      return recipientMatchesInspection({
+        deliveryScope: recipient.deliveryScope,
+        hasDefects: Boolean(params.hasDefects),
+        overallResult: params.overallResult ?? 'INCOMPLETE',
+      })
+    }
+
+    return true
+  })
 }

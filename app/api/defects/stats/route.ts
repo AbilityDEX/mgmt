@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server'
-import { requireAuth, serverConfigErrorMessage, supabaseAdmin } from '@/lib/admin'
+import { requireAuthContext, serverConfigErrorMessage, supabaseAdmin } from '@/lib/admin'
 import { activeDefectStatuses, DefectStatus } from '@/lib/services/defects'
 
 export async function GET(request: Request) {
-  const auth = await requireAuth(request)
+  const auth = await requireAuthContext(request)
   if ('error' in auth) {
     return NextResponse.json({ error: auth.error }, { status: auth.status })
   }
@@ -20,7 +20,17 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: defectsError.message }, { status: 500 })
   }
 
-  const defects = defectsData ?? []
+  let defects = defectsData ?? []
+
+  if (!auth.isAdmin) {
+    const { data: machineRows } = await supabaseAdmin
+      .from('machines')
+      .select('id')
+      .eq('assigned_user', auth.username ?? '')
+
+    const allowedMachineIds = new Set((machineRows ?? []).map((row) => row.id as string))
+    defects = defects.filter((defect) => allowedMachineIds.has(defect.machine_id as string))
+  }
 
   const openDefects = defects.filter((defect) =>
     activeDefectStatuses.includes(defect.status as DefectStatus)

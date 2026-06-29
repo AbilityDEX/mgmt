@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
+import { formatInspectionDateTime } from '@/lib/inspectionTime'
 import { supabaseClient } from '@/lib/supabase'
 import type { InspectionHistory } from '@/lib/data/inspections'
 
@@ -12,9 +13,7 @@ async function getToken(): Promise<string | null> {
 }
 
 function formatDateTime(value: string | null) {
-  if (!value) return 'N/A'
-  const parsed = new Date(value)
-  return Number.isNaN(parsed.getTime()) ? 'N/A' : parsed.toLocaleString()
+  return formatInspectionDateTime(value)
 }
 
 function formatDuration(startedAt: string | null, completedAt: string | null) {

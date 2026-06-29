@@ -13,6 +13,7 @@ type UserRow = {
   workArea: string
   phone: string
   active: boolean
+  receiveInspectionReminderEmails: boolean
   isProtected: boolean
 }
 
@@ -26,6 +27,7 @@ type UserFormState = {
   workArea: string
   phone: string
   active: boolean
+  receiveInspectionReminderEmails: boolean
 }
 
 const initialFormState: UserFormState = {
@@ -38,6 +40,7 @@ const initialFormState: UserFormState = {
   workArea: '',
   phone: '',
   active: true,
+  receiveInspectionReminderEmails: false,
 }
 
 const roleOptions = ['User', 'Admin', 'Supervisor']
@@ -149,6 +152,7 @@ export default function AdminUsersPage() {
       workArea: user.workArea,
       phone: user.phone,
       active: user.active,
+      receiveInspectionReminderEmails: user.receiveInspectionReminderEmails,
     })
     setIsEditing(true)
     setFormError(null)
@@ -186,6 +190,7 @@ export default function AdminUsersPage() {
             work_area: formState.workArea,
             phone: formState.phone,
             active: formState.active,
+            receive_inspection_reminder_emails: formState.receiveInspectionReminderEmails,
             ...(formState.password.trim() ? { password: formState.password } : {}),
           }),
         })
@@ -201,6 +206,7 @@ export default function AdminUsersPage() {
             role: formState.role,
             work_area: formState.workArea,
             phone: formState.phone,
+            receive_inspection_reminder_emails: formState.receiveInspectionReminderEmails,
           }),
         })
       }
@@ -241,6 +247,7 @@ export default function AdminUsersPage() {
           work_area: user.workArea,
           phone: user.phone,
           active: !user.active,
+          receive_inspection_reminder_emails: user.receiveInspectionReminderEmails,
         }),
       })
       if (!response.ok) throw new Error(await getErrorFromResponse(response, 'Failed to update user.'))
@@ -567,6 +574,18 @@ export default function AdminUsersPage() {
                   </div>
                 </label>
               ) : null}
+
+              <label className="block sm:col-span-2">
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={formState.receiveInspectionReminderEmails}
+                    onChange={(e) => handleInputChange('receiveInspectionReminderEmails', e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-400"
+                  />
+                  <span className="text-sm text-slate-300">Receive Inspection Reminder Emails</span>
+                </div>
+              </label>
             </div>
 
             {formError ? <p className="mt-4 text-sm text-rose-400">{formError}</p> : null}

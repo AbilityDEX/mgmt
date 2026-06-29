@@ -2,6 +2,7 @@ import crypto from 'crypto'
 import nodemailer from 'nodemailer'
 
 import { serverConfigErrorMessage, supabaseAdmin } from '@/lib/admin'
+import { INSPECTION_TIMEZONE, normalizeInspectionTimezone } from '@/lib/inspectionTime'
 import { resolveCompanyName, resolveEmailEnvelope } from '@/lib/services/emailConfig'
 import { buildSmtpTestEmailTemplate } from '@/lib/services/emailMessageTemplates'
 import { createTestPDF } from '@/lib/services/pdf'
@@ -27,6 +28,11 @@ type StoredSmtpConfig = {
     timezone?: string | null
     dateFormat?: string | null
     timeFormat?: string | null
+    dailyReminderSendTime?: string | null
+    dueSoonWarningDays?: number | null
+    enableDueSoon?: boolean | null
+    enableEmployeeReminderEmails?: boolean | null
+    enableManagementOverdueNotifications?: boolean | null
   }
 }
 
@@ -36,6 +42,11 @@ export type SmtpOrgSettingsInput = {
   timezone?: string | null
   dateFormat?: string | null
   timeFormat?: string | null
+  dailyReminderSendTime?: string | null
+  dueSoonWarningDays?: number | null
+  enableDueSoon?: boolean | null
+  enableEmployeeReminderEmails?: boolean | null
+  enableManagementOverdueNotifications?: boolean | null
 }
 
 export type SmtpConfigInput = {
@@ -66,6 +77,11 @@ export type SmtpConfigPublic = {
     timezone: string | null
     dateFormat: string | null
     timeFormat: string | null
+    dailyReminderSendTime: string | null
+    dueSoonWarningDays: number | null
+    enableDueSoon: boolean | null
+    enableEmployeeReminderEmails: boolean | null
+    enableManagementOverdueNotifications: boolean | null
   }
 }
 
@@ -138,9 +154,14 @@ function mapStoredToPublic(config: StoredSmtpConfig | null): SmtpConfigPublic {
       orgSettings: {
         archiveEmail: null,
         supportEmail: null,
-        timezone: null,
+        timezone: INSPECTION_TIMEZONE,
         dateFormat: null,
         timeFormat: null,
+        dailyReminderSendTime: null,
+        dueSoonWarningDays: null,
+        enableDueSoon: null,
+        enableEmployeeReminderEmails: null,
+        enableManagementOverdueNotifications: null,
       },
     }
   }
@@ -159,9 +180,14 @@ function mapStoredToPublic(config: StoredSmtpConfig | null): SmtpConfigPublic {
     orgSettings: {
       archiveEmail: config.orgSettings?.archiveEmail ?? null,
       supportEmail: config.orgSettings?.supportEmail ?? null,
-      timezone: config.orgSettings?.timezone ?? null,
+      timezone: normalizeInspectionTimezone(config.orgSettings?.timezone ?? null),
       dateFormat: config.orgSettings?.dateFormat ?? null,
       timeFormat: config.orgSettings?.timeFormat ?? null,
+      dailyReminderSendTime: config.orgSettings?.dailyReminderSendTime ?? null,
+      dueSoonWarningDays: config.orgSettings?.dueSoonWarningDays ?? null,
+      enableDueSoon: config.orgSettings?.enableDueSoon ?? null,
+      enableEmployeeReminderEmails: config.orgSettings?.enableEmployeeReminderEmails ?? null,
+      enableManagementOverdueNotifications: config.orgSettings?.enableManagementOverdueNotifications ?? null,
     },
   }
 }
@@ -265,9 +291,14 @@ export async function saveSmtpConfig(input: SmtpConfigInput) {
     orgSettings: stored.config?.orgSettings ?? {
       archiveEmail: null,
       supportEmail: null,
-      timezone: null,
+      timezone: INSPECTION_TIMEZONE,
       dateFormat: null,
       timeFormat: null,
+      dailyReminderSendTime: '07:00',
+      dueSoonWarningDays: 2,
+      enableDueSoon: true,
+      enableEmployeeReminderEmails: true,
+      enableManagementOverdueNotifications: true,
     },
   }
 
@@ -378,9 +409,14 @@ export async function saveSmtpOrgSettings(input: SmtpOrgSettingsInput) {
     orgSettings: {
       archiveEmail: input.archiveEmail?.trim() || null,
       supportEmail: input.supportEmail?.trim() || null,
-      timezone: input.timezone?.trim() || null,
+      timezone: INSPECTION_TIMEZONE,
       dateFormat: input.dateFormat?.trim() || null,
       timeFormat: input.timeFormat?.trim() || null,
+      dailyReminderSendTime: input.dailyReminderSendTime?.trim() || null,
+      dueSoonWarningDays: input.dueSoonWarningDays ?? null,
+      enableDueSoon: input.enableDueSoon ?? null,
+      enableEmployeeReminderEmails: input.enableEmployeeReminderEmails ?? null,
+      enableManagementOverdueNotifications: input.enableManagementOverdueNotifications ?? null,
     },
   }
 

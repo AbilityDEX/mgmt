@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { formatInspectionDateTime } from '@/lib/inspectionTime'
 import { supabaseClient } from '@/lib/supabase'
 
 type InspectionTemplate = {
@@ -148,7 +149,7 @@ function AdminInspectionTemplatesContent() {
                     {template.description ? <p className="mt-2 text-sm text-slate-400">{template.description}</p> : null}
                     <p className="mt-4 text-sm text-slate-300">Inspection Items: <span className="font-semibold text-white">{template.itemCount}</span></p>
                     <p className="mt-1 text-sm text-slate-300">Assigned to Machines: <span className="font-semibold text-white">{template.machineCount ?? 0}</span></p>
-                    <p className="mt-1 text-sm text-slate-400">Last Updated: {new Date(template.lastUpdated).toLocaleString()}</p>
+                    <p className="mt-1 text-sm text-slate-400">Last Updated: {formatInspectionDateTime(template.lastUpdated)}</p>
                   </div>
                   <div className="flex gap-3">
                     <Link

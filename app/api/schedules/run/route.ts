@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { requireAdmin, serverConfigErrorMessage, supabaseAdmin } from '@/lib/admin'
-import { runInspectionScheduler } from '@/lib/services/inspectionScheduling'
+import { runAutomatedSchedulerCycle } from '@/lib/services/schedulerAutomation'
+
+export const runtime = 'nodejs'
 
 export async function POST(request: Request) {
   const auth = await requireAdmin(request)
@@ -13,16 +15,18 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await runInspectionScheduler()
+    const result = await runAutomatedSchedulerCycle()
 
     return NextResponse.json({
       success: true,
-      generated: result.generatedCount,
-      skipped: result.skippedDuplicateCount,
-      checked: result.checkedCount,
-      overdueMarked: result.overdueMarked,
-      executedAt: result.processedAt,
-      scheduleRepair: result.scheduleRepair,
+      skipped: result.skipped,
+      reason: result.reason,
+      executedAt: result.executedAt,
+      scheduler: result.scheduler ?? null,
+      remindersQueued: result.remindersQueued ?? null,
+      remindersSent: result.remindersSent ?? null,
+      queue: result.queue ?? null,
+      retries: result.retries ?? null,
     })
   } catch (error) {
     return NextResponse.json(

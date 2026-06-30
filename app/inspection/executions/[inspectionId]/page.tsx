@@ -430,6 +430,7 @@ export default function InspectionExecutionPage() {
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="text-sm font-semibold text-slate-100">{item.question}</p>
+                        {item.helpText ? <p className="mt-1 text-xs text-slate-400">{item.helpText}</p> : null}
                         <p className="mt-1 text-xs text-slate-400">Type: {item.questionType}</p>
                       </div>
                       {renderReadOnlyResult(item)}

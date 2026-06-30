@@ -8,6 +8,7 @@ import { supabaseClient } from '@/lib/supabase'
 type DraftTemplateItem = {
   id?: string
   question: string
+  description?: string
   questionType: string
   required: boolean
   displayOrder: number
@@ -87,6 +88,7 @@ export default function EditInspectionTemplatePage() {
       const draftItems = templateItems.map((item: TemplateItem) => ({
         id: item.id,
         question: item.question,
+        description: (item as any).description ?? '',
         questionType: item.question_type,
         required: item.required,
         displayOrder: item.display_order,
@@ -135,6 +137,10 @@ export default function EditInspectionTemplatePage() {
     setItems((prev) =>
       prev.map((item, i) => (i === idx ? { ...item, question } : item))
     )
+  }
+
+  const updateItemDescription = (idx: number, description: string) => {
+    setItems((prev) => prev.map((item, i) => (i === idx ? { ...item, description } : item)))
   }
 
   const updateItemRequired = (idx: number, required: boolean) => {
@@ -212,6 +218,7 @@ export default function EditInspectionTemplatePage() {
           items: normalizedItems.map((item) => ({
             id: item.id,
             question: item.question,
+            description: item.description && item.description.trim() ? item.description.trim() : null,
             question_type: item.questionType,
             required: item.required,
             display_order: item.displayOrder,
@@ -444,6 +451,19 @@ export default function EditInspectionTemplatePage() {
                           <span className="text-slate-300">Required</span>
                         </label>
                       </div>
+                      {item.isEditing ? (
+                        <label className="mt-3 block">
+                          <span className="text-xs text-slate-300">Description (Optional)</span>
+                          <textarea
+                            rows={2}
+                            value={item.description ?? ''}
+                            onChange={(e) => updateItemDescription(index, e.target.value)}
+                            className="mt-2 w-full rounded-2xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none resize-none"
+                            placeholder="Describe what the inspector should be checking..."
+                            disabled={saving || deleting}
+                          />
+                        </label>
+                      ) : null}
                     </div>
                   </article>
                 ))

@@ -21,6 +21,7 @@ type InspectionItemRow = {
   answer: string | null
   comments: string | null
   completed: boolean
+  description?: string | null
 }
 
 type InspectionSnapshot = {
@@ -253,7 +254,7 @@ export async function completeInspectionWorkflow(params: { inspectionId: string;
     logCompletionStage(stage, { inspectionId: params.inspectionId })
     const { data: itemsData, error: itemsError } = await supabaseAdmin
       .from('inspection_items')
-      .select('id, display_order, question, required, answer, comments, completed')
+      .select('id, display_order, question, description, required, answer, comments, completed')
       .eq('inspection_id', params.inspectionId)
       .order('display_order', { ascending: true })
 
@@ -291,7 +292,7 @@ export async function completeInspectionWorkflow(params: { inspectionId: string;
 
     const { data: persistedItemsData, error: persistedItemsError } = await supabaseAdmin
       .from('inspection_items')
-      .select('id, display_order, question, required, answer, comments')
+      .select('id, display_order, question, description, required, answer, comments')
       .eq('inspection_id', params.inspectionId)
       .order('display_order', { ascending: true })
 
@@ -303,6 +304,7 @@ export async function completeInspectionWorkflow(params: { inspectionId: string;
       id: string
       display_order: number
       question: string
+      description?: string | null
       required: boolean
       answer: string | null
       comments: string | null
@@ -331,6 +333,7 @@ export async function completeInspectionWorkflow(params: { inspectionId: string;
       return {
         id: item.id,
         label: item.question,
+        description: (item.description as string | null) ?? null,
         status: answer === 'fail' ? 'fail' : 'pass',
         faultDescription: answer === 'fail' ? (item.comments ?? '') : undefined,
       }

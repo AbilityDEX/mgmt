@@ -133,7 +133,7 @@ async function loadInspectionArchiveData(inspectionId: string) {
 
   const { data: itemsData, error: itemsError } = await supabaseAdmin
     .from('inspection_items')
-    .select('id, display_order, question, question_type, answer, comments')
+    .select('id, display_order, question, description, question_type, answer, comments')
     .eq('inspection_id', inspectionId)
     .order('display_order', { ascending: true })
 
@@ -193,6 +193,7 @@ async function loadInspectionArchiveData(inspectionId: string) {
       id: row.id as string,
       displayOrder: Number(row.display_order ?? 0),
       question: row.question as string,
+      description: (row.description as string | null) ?? null,
       questionType,
       answer,
       comments: (row.comments as string | null) ?? null,

@@ -8,6 +8,7 @@ import { supabaseClient } from '@/lib/supabase'
 type DraftTemplateItem = {
   id: string
   question: string
+  description?: string
   isEditing: boolean
 }
 
@@ -45,6 +46,7 @@ export default function CreateInspectionTemplatePage() {
       {
         id: createItemId(),
         question,
+        description: '',
         isEditing: false,
       },
     ])
@@ -57,6 +59,10 @@ export default function CreateInspectionTemplatePage() {
     setItems((prev) =>
       prev.map((item) => (item.id === itemId ? { ...item, question } : item))
     )
+  }
+
+  const updateItemDescription = (itemId: string, description: string) => {
+    setItems((prev) => prev.map((item) => (item.id === itemId ? { ...item, description } : item)))
   }
 
   const toggleItemEdit = (itemId: string, nextValue: boolean) => {
@@ -122,6 +128,7 @@ export default function CreateInspectionTemplatePage() {
           name: templateName.trim(),
           items: normalizedItems.map((item, index) => ({
             question: item.question,
+            description: item.description && item.description.trim() ? item.description.trim() : null,
             display_order: index + 1,
           })),
         }),
@@ -276,6 +283,19 @@ export default function CreateInspectionTemplatePage() {
                         </button>
                       </div>
                     </div>
+                      {item.isEditing ? (
+                        <label className="mt-3 block">
+                          <span className="text-xs text-slate-300">Description (Optional)</span>
+                          <textarea
+                            rows={2}
+                            value={item.description ?? ''}
+                            onChange={(e) => updateItemDescription(item.id, e.target.value)}
+                            className="mt-2 w-full rounded-2xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none resize-none"
+                            placeholder="Describe what the inspector should be checking..."
+                            disabled={saving}
+                          />
+                        </label>
+                      ) : null}
                   </article>
                 ))
               )}

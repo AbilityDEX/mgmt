@@ -12,6 +12,7 @@ type TemplateItemRow = {
   id: string
   template_id: string
   question: string
+  description: string | null
   question_type: string
   required: boolean
   display_order: number
@@ -30,13 +31,13 @@ const defaultQuestionType: InspectionQuestionType = 'pass_fail'
 
 type CreateTemplateBody = {
   name?: string
-  items?: Array<{ question?: string; question_type?: InspectionQuestionType }>
+  items?: Array<{ question?: string; description?: string | null; question_type?: InspectionQuestionType }>
 }
 
 type UpdateTemplateBody = {
   name?: string
   description?: string | null
-  items?: Array<{ id?: string; question?: string; question_type?: InspectionQuestionType; required?: boolean; display_order?: number }>
+  items?: Array<{ id?: string; question?: string; description?: string | null; question_type?: InspectionQuestionType; required?: boolean; display_order?: number }>
 }
 
 type AssignedMachine = {
@@ -77,7 +78,7 @@ export async function GET(request: Request) {
 
     const { data: itemsData, error: itemsError } = await supabaseAdmin
       .from('checklist_template_items')
-      .select('id, template_id, question, question_type, required, display_order, created_at')
+      .select('id, template_id, question, description, question_type, required, display_order, created_at')
       .eq('template_id', templateId)
       .order('display_order', { ascending: true })
 
@@ -162,14 +163,25 @@ export async function POST(request: Request) {
   const name = body.name?.trim() ?? ''
   const rawItems = Array.isArray(body.items) ? body.items : []
   const normalizedItems = rawItems
-    .map((item) => ({
-      question: item.question?.trim() ?? '',
-      questionType: item.question_type ?? defaultQuestionType,
-    }))
+    .map((item) => {
+      const desc = typeof item.description === 'string' ? item.description.trim() : null
+      return {
+        question: item.question?.trim() ?? '',
+        description: desc || null,
+        questionType: item.question_type ?? defaultQuestionType,
+      }
+    })
     .filter((item) => item.question)
 
   if (!name) {
     return NextResponse.json({ error: 'Template name is required.' }, { status: 400 })
+  }
+
+  // Validate description lengths
+  for (const it of normalizedItems) {
+    if (it.description && it.description.length > 1000) {
+      return NextResponse.json({ error: 'Description must be 1000 characters or fewer.' }, { status: 400 })
+    }
   }
 
   if (normalizedItems.length === 0) {
@@ -203,6 +215,7 @@ export async function POST(request: Request) {
         template_id: templateId,
         display_order: index + 1,
         question: item.question,
+        description: item.description || null,
         question_type: item.questionType,
       }))
     )
@@ -258,17 +271,27 @@ export async function PUT(request: Request) {
 
   // Normalize items
   const normalizedItems = rawItems
-    .map((item, index) => ({
-      id: item.id,
-      question: item.question?.trim() ?? '',
-      questionType: item.question_type ?? defaultQuestionType,
-      required: item.required ?? true,
-      displayOrder: item.display_order ?? index + 1,
-    }))
+    .map((item, index) => {
+      const desc = typeof item.description === 'string' ? item.description.trim() : null
+      return {
+        id: item.id,
+        question: item.question?.trim() ?? '',
+        description: desc || null,
+        questionType: item.question_type ?? defaultQuestionType,
+        required: item.required ?? true,
+        displayOrder: item.display_order ?? index + 1,
+      }
+    })
     .filter((item) => item.question)
 
   if (normalizedItems.length === 0) {
     return NextResponse.json({ error: 'At least one valid inspection item is required.' }, { status: 400 })
+  }
+
+  for (const it of normalizedItems) {
+    if (it.description && it.description.length > 1000) {
+      return NextResponse.json({ error: 'Description must be 1000 characters or fewer.' }, { status: 400 })
+    }
   }
 
   // Update template
@@ -318,6 +341,7 @@ export async function PUT(request: Request) {
         .from('checklist_template_items')
         .update({
           question: item.question,
+          description: item.description || null,
           question_type: item.questionType,
           required: item.required,
           display_order: item.displayOrder,
@@ -334,10 +358,11 @@ export async function PUT(request: Request) {
         .insert([
           {
             template_id: templateId,
-            question: item.question,
-            question_type: item.questionType,
-            required: item.required,
-            display_order: item.displayOrder,
+              question: item.question,
+              description: item.description || null,
+              question_type: item.questionType,
+              required: item.required,
+              display_order: item.displayOrder,
           },
         ])
 

@@ -18,6 +18,7 @@ type CompanyBranding = {
 type InspectionPdfItem = {
   displayOrder: number
   question: string
+  description?: string | null
   answer: string | null
   comments: string | null
   photos: unknown[]
@@ -250,6 +251,9 @@ async function addChecklistSection(doc: PDFKit.PDFDocument, items: InspectionPdf
 
   for (const item of items) {
     doc.fontSize(10).fillColor('#0f172a').text(`${item.displayOrder}. ${toDisplay(item.question)}`)
+    if (item.description) {
+      doc.fillColor('#6b7280').fontSize(9).text(item.description)
+    }
     doc.fillColor('#475569').text(`Answer: ${toDisplay(item.answer)}`)
     doc.text(`Comments: ${toDisplay(item.comments)}`)
 

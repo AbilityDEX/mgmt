@@ -306,7 +306,7 @@ async function ensureGeneratedInspectionForSchedule(params: {
   if ((existingItemCount ?? 0) === 0) {
     const { data: templateItems, error: templateItemsError } = await supabaseAdmin
       .from('checklist_template_items')
-      .select('id, display_order, question, question_type, required')
+      .select('id, display_order, question, description, question_type, required')
       .eq('template_id', params.templateId)
       .order('display_order', { ascending: true })
 
@@ -320,6 +320,7 @@ async function ensureGeneratedInspectionForSchedule(params: {
           original_template_item_id: item.id as string,
           display_order: Number(item.display_order ?? 0),
           question: item.question as string,
+          description: (item.description as string | null) ?? null,
           question_type: (item.question_type as string | null) ?? 'pass_fail',
           required: Boolean(item.required ?? true),
           completed: false,

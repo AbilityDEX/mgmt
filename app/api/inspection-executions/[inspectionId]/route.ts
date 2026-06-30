@@ -18,6 +18,7 @@ type InspectionItemRow = {
   answer: string | null
   comments: string | null
   completed: boolean
+  description?: string | null
 }
 
 type DefectRow = {
@@ -84,7 +85,7 @@ export async function GET(request: Request, context: RouteContext) {
 
   const { data: itemsData, error: itemsError } = await supabaseAdmin
     .from('inspection_items')
-    .select('id, display_order, question, question_type, required, answer, comments, completed')
+    .select('id, display_order, question, question_type, required, description, answer, comments, completed')
     .eq('inspection_id', inspectionId)
     .order('display_order', { ascending: true })
 
@@ -124,6 +125,7 @@ export async function GET(request: Request, context: RouteContext) {
         question: item.question,
         questionType: item.question_type,
         required: item.required,
+        helpText: (item.description as string | null) ?? undefined,
         answer: item.answer,
         comments: item.comments,
         completed: item.completed,

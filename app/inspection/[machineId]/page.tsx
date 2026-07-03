@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { formatInspectionDateTime, formatInspectionDate, startOfLondonDay } from '@/lib/inspectionTime'
 import StatusBanner from '@/components/StatusBanner'
+import SummaryCard from '@/components/SummaryCard'
 import { useCurrentUser } from '@/lib/store'
 import { supabaseClient } from '@/lib/supabase'
 
@@ -321,25 +322,20 @@ export default function MachineInspectionPage() {
         {error ? <div className="mb-4 rounded-[20px] bg-rose-600/15 px-5 py-3 text-sm font-medium text-rose-300">{error}</div> : null}
 
         <section className="mb-6 grid gap-3 rounded-[28px] bg-slate-900/90 p-5 shadow-[0_18px_40px_rgba(0,0,0,0.22)] sm:grid-cols-2 lg:grid-cols-5">
-          <div className="rounded-2xl bg-slate-950/80 px-4 py-3">
-            <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Machine Status</p>
-            <p className="mt-1 text-sm font-semibold text-slate-100">{machine?.status ?? 'Unknown'}</p>
+          {/* Summary cards: Machine Status, Last Inspection, Next Inspection, Deadline, Frequency, Template */}
+          <div className="lg:col-span-2">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <SummaryCard title="Machine" icon="🛠️" value={machine?.name ?? '—'} sub={machine?.area ?? ''} />
+              <SummaryCard title="Status" icon="🔘" value={machine?.status ?? 'Unknown'} />
+              <SummaryCard title="Last Inspection" icon="✅" value={formatDisplayDate(lastInspection?.completedAt ?? lastInspection?.startedAt ?? null)} />
+              <SummaryCard title="Next Inspection" icon="📅" value={machine?.nextScheduledAt ? formatInspectionDateTime(machine.nextScheduledAt) : null} sub={primaryTemplate?.inspectionFrequency ?? null} />
+            </div>
           </div>
-          <div className="rounded-2xl bg-slate-950/80 px-4 py-3">
-            <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Last Inspection</p>
-            <p className="mt-1 text-sm font-semibold text-slate-100">{formatDisplayDate(lastInspection?.completedAt ?? lastInspection?.startedAt ?? null)}</p>
-          </div>
-          <div className="rounded-2xl bg-slate-950/80 px-4 py-3">
-            <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Next Scheduled</p>
-            <p className="mt-1 text-sm font-semibold text-slate-100">{formatDisplayDate(machine?.nextScheduledAt ?? null)}</p>
-          </div>
-          <div className="rounded-2xl bg-slate-950/80 px-4 py-3">
-            <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Assigned Template</p>
-            <p className="mt-1 text-sm font-semibold text-slate-100">{primaryTemplate?.templateName ?? 'Unassigned'}</p>
-          </div>
-          <div className="rounded-2xl bg-slate-950/80 px-4 py-3">
-            <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Frequency</p>
-            <p className="mt-1 text-sm font-semibold text-slate-100">{primaryTemplate?.inspectionFrequency ?? 'N/A'}</p>
+          <div className="lg:col-span-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <SummaryCard title="Deadline" icon="⏰" value={primaryTemplate?.nextDue ? new Date(primaryTemplate.nextDue).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null} />
+              <SummaryCard title="Template" icon="📋" value={primaryTemplate?.templateName ?? 'Unassigned'} />
+            </div>
           </div>
         </section>
 

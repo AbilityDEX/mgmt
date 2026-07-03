@@ -37,6 +37,74 @@ function isAuthorizedCronRequest(request: Request): { ok: true } | { ok: false; 
   return { ok: true }
 }
 
+/**
+ * Attempt a minimal DB query to verify Supabase is awake.
+ * Uses exponential backoff until a successful response or timeout.
+ */
+async function waitForDatabaseConnection(
+  supabaseClient: any,
+  maxWaitMs = 5 * 60 * 1000
+): Promise<
+  | { ok: true; metrics: { attempts: number; totalMs: number; delays: number[]; startedAt: number; finishedAt: number } }
+  | { ok: false; error: string; metrics?: { attempts: number; totalMs: number; delays: number[]; startedAt: number; finishedAt: number } }
+> {
+  const startedAt = Date.now()
+  const delays = [15000, 30000, 60000, 120000]
+  const recordedDelays: number[] = []
+  let attempt = 0
+
+  console.info('[cron-daily-maintenance] Database wake check start', { startedAt })
+
+  while (Date.now() - startedAt < maxWaitMs) {
+    attempt += 1
+    try {
+      // Call a lightweight SQL function that returns a constant value.
+      // This avoids probing application tables and verifies the DB is accepting
+      // queries. The function `public.health_ping()` is created by a migration
+      // and returns integer 1.
+      const { data, error } = await supabaseClient.rpc('health_ping')
+
+      if (!error) {
+        const finishedAt = Date.now()
+        const totalMs = finishedAt - startedAt
+        console.info('[cron-daily-maintenance] Database available (health_ping)', {
+          attempt,
+          totalMs,
+          startedAt,
+          finishedAt,
+        })
+        return {
+          ok: true,
+          metrics: { attempts: attempt, totalMs, delays: recordedDelays, startedAt, finishedAt },
+        }
+      }
+
+      console.warn('[cron-daily-maintenance] DB health_ping returned error, will retry', {
+        attempt,
+        error: error?.message ?? String(error),
+      })
+    } catch (err) {
+      console.warn('[cron-daily-maintenance] DB health_ping exception, will retry', {
+        attempt,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+
+    const delay = delays[Math.min(attempt - 1, delays.length - 1)]
+    recordedDelays.push(delay)
+    console.info('[cron-daily-maintenance] Sleeping before retry', { attempt, delay })
+    await new Promise((resolve) => setTimeout(resolve, delay))
+  }
+
+  const finishedAt = Date.now()
+  const totalMs = finishedAt - startedAt
+  return {
+    ok: false,
+    error: 'Timed out waiting for database to become available',
+    metrics: { attempts: attempt, totalMs, delays: recordedDelays, startedAt, finishedAt },
+  }
+}
+
 async function executeDailyMaintenance(request: Request) {
   const startedAt = Date.now()
   const authResult = isAuthorizedCronRequest(request)
@@ -63,10 +131,47 @@ async function executeDailyMaintenance(request: Request) {
     )
   }
 
+  console.info('[cron-daily-maintenance] Cron start')
+
+  // Ensure the database is awake before attempting maintenance. This will
+  // retry with exponential backoff for up to ~5 minutes.
+  const dbWake = await waitForDatabaseConnection(supabaseAdmin)
+  if (!dbWake.ok) {
+    const durationMs = Date.now() - startedAt
+    console.error('[cron-daily-maintenance] Database did not become available', {
+      durationMs,
+      error: dbWake.error,
+      metrics: dbWake.metrics ?? null,
+    })
+
+    return NextResponse.json(
+      {
+        success: false,
+        error: dbWake.error,
+        durationMs,
+        metrics: dbWake.metrics ?? null,
+      },
+      { status: 503 }
+    )
+  }
+
+  // Log DB wake metrics when available
+  if (dbWake.ok && 'metrics' in dbWake && dbWake.metrics) {
+    console.info('[cron-daily-maintenance] Database wake metrics', dbWake.metrics)
+  }
+
   const owner = `vercel-cron:${new Date().toISOString()}`
 
   try {
+    const maintenanceStart = Date.now()
+    console.info('[cron-daily-maintenance] Maintenance start', { maintenanceStart })
     const result = await dailyMaintenance.runDailyMaintenance(supabaseAdmin, owner)
+    const maintenanceFinish = Date.now()
+    console.info('[cron-daily-maintenance] Maintenance finished', {
+      maintenanceStart,
+      maintenanceFinish,
+      maintenanceDurationMs: maintenanceFinish - maintenanceStart,
+    })
     const durationMs = Date.now() - startedAt
     const skipped = result.success && !result.logId
     const statusCode = result.success ? 200 : 500

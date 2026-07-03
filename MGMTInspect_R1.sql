@@ -82,11 +82,12 @@ ALTER FUNCTION "public"."update_updated_at_column"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."validate_inspection_start_lock"() RETURNS "trigger"
-    LANGUAGE "plpgsql"
-    AS $$
+        LANGUAGE "plpgsql"
+        AS $$
 declare
-  v_next_due timestamptz;
-  v_existing_in_progress uuid;
+    v_next_due timestamptz;
+    v_existing_in_progress uuid;
+    v_local_midnight timestamptz;
 begin
   if new.status <> 'In Progress' then
     return new;
@@ -101,9 +102,15 @@ begin
   where s.id = new.schedule_id
   limit 1;
 
-  if v_next_due is not null and now() < v_next_due then
-    raise exception 'LOCKED_UNTIL:%', v_next_due using errcode = 'P0001';
-  end if;
+    if v_next_due is not null then
+        -- Compute local midnight for the due date in Europe/London and use that
+        -- as the unlock time so the deadline (time-of-day) doesn't block starts.
+        v_local_midnight := ((v_next_due AT TIME ZONE 'Europe/London')::date)::timestamp AT TIME ZONE 'Europe/London';
+
+        if now() < v_local_midnight then
+            raise exception 'LOCKED_UNTIL:%', v_local_midnight using errcode = 'P0001';
+        end if;
+    end if;
 
   select i.id into v_existing_in_progress
   from public.inspections i

@@ -52,25 +52,10 @@ async function getUserFromBearerToken(request: Request) {
   }
 
   const authHeader = request.headers.get('authorization') ?? ''
-  // Debug: log incoming authorization header for troubleshooting authentication issues
-  try {
-    // Don't log full token in production; this is temporary for local diagnosis
-    // eslint-disable-next-line no-console
-    console.log('[auth] incoming Authorization header (raw):', JSON.stringify(authHeader))
-    // eslint-disable-next-line no-console
-    console.log('[auth] header startsWith "Bearer ":', authHeader.startsWith('Bearer '))
-    // eslint-disable-next-line no-console
-    console.log('[auth] header length:', authHeader.length)
-  } catch (e) {
-    /* ignore logging errors */
-  }
+  // Do not log authorization headers or tokens in production.
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
 
-  try {
-    // Debug: log extracted token presence
-    // eslint-disable-next-line no-console
-    console.log('[auth] token present:', Boolean(token))
-  } catch (e) {}
+  // Avoid exposing token presence in logs.
 
   if (!token) {
     return { error: 'Authentication required', status: 401 as const }

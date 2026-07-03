@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { requireAuthContext, serverConfigErrorMessage, supabaseAdmin } from '@/lib/admin'
-import { combineLondonDateAndTime, formatInspectionDateTime, startOfLondonDay } from '@/lib/inspectionTime'
+import { combineLondonDateAndTime, formatInspectionDateTime, formatInspectionDate, startOfLondonDay } from '@/lib/inspectionTime'
 import { canAccessMachine } from '@/lib/services/inspectionAccess'
 import { buildInspectionGenerationKey } from '@/lib/services/schedulerKeys'
 import { repairInspectionScheduleCoverage, runInspectionScheduler } from '@/lib/services/inspectionScheduling'
@@ -230,7 +230,9 @@ export async function GET(request: Request) {
         active: Boolean(assignment.active),
         nextDue,
         isLocked,
-        lockMessage: isLocked && nextDue ? `Next inspection available on ${formatDateTime(nextDue)}` : null,
+        lockMessage: isLocked && nextDue ? `Next inspection available on ${formatInspectionDate(
+          startOfLondonDay(new Date(nextDue)).toISOString()
+        )}` : null,
       }
     }),
     inspections: inspections.map((inspection) => ({

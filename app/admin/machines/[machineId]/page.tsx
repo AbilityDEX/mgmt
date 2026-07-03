@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import { formatInspectionDateTime } from '@/lib/inspectionTime'
+import { formatInspectionDateTime, formatInspectionDate } from '@/lib/inspectionTime'
 import { supabaseClient } from '@/lib/supabase'
 
 type MachineDetails = {
@@ -70,9 +70,7 @@ type AssignedTemplateForStart = {
   lockMessage: string | null
 }
 
-function formatDisplayDate(value: string | null) {
-  return formatInspectionDateTime(value)
-}
+// helper removed; use formatInspectionDate / formatInspectionDateTime directly
 
 const defaultFrequency: AssignmentFrequency = 'Monthly'
 
@@ -156,7 +154,7 @@ export default function AdminMachineDetailsPage() {
   const startLockMessage =
     allTemplatesLocked && selectedStartTemplate
       ? selectedStartTemplate.lockMessage ??
-        (selectedStartTemplate.nextDue ? `Next inspection ${formatDisplayDate(selectedStartTemplate.nextDue)}` : null)
+        (selectedStartTemplate.nextDue ? `Next inspection ${formatInspectionDate(selectedStartTemplate.nextDue)}` : null)
       : null
 
   const inputClass =
@@ -390,7 +388,7 @@ export default function AdminMachineDetailsPage() {
         if (response.status === 409) {
           await loadInspectionHistory()
           const lockError = payload.nextDue
-            ? `Next inspection ${formatDisplayDate(payload.nextDue as string)}`
+            ? `Next inspection ${formatInspectionDate(payload.nextDue as string)}`
             : payload.error
           setError(lockError || 'Failed to start inspection.')
           return
@@ -779,12 +777,12 @@ export default function AdminMachineDetailsPage() {
                       <div>
                         <p className="text-sm font-semibold text-white">{inspection.templateName}</p>
                         <p className="mt-1 text-xs text-slate-400">
-                          Inspection Date: {formatDisplayDate(inspection.completedAt ?? inspection.startedAt)}
+                          Inspection Date: {formatInspectionDateTime(inspection.completedAt ?? inspection.startedAt)}
                         </p>
                         <p className="mt-1 text-xs text-slate-400">Completed By: {inspection.completedBy}</p>
                         {inspection.status === 'In Progress' && inspection.isOverdue ? (
-                          <p className="mt-1 text-xs font-semibold text-rose-300">
-                            Overdue since {formatDisplayDate(inspection.dueAt)}
+                            <p className="mt-1 text-xs font-semibold text-rose-300">
+                            Overdue since {formatInspectionDate(inspection.dueAt)}
                           </p>
                         ) : null}
                         {inspection.status === 'Completed' ? (
@@ -843,7 +841,7 @@ export default function AdminMachineDetailsPage() {
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
                           <p className="text-sm font-semibold text-white">{defect.title}</p>
-                          <p className="mt-1 text-xs text-slate-400">Created: {formatDisplayDate(defect.createdAt)}</p>
+                          <p className="mt-1 text-xs text-slate-400">Created: {formatInspectionDateTime(defect.createdAt)}</p>
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="inline-flex rounded-full bg-amber-500/15 px-3 py-1 text-xs font-semibold text-amber-300">
@@ -888,9 +886,9 @@ export default function AdminMachineDetailsPage() {
                       <div>
                         <p className="text-sm font-semibold text-white">{schedule.templateName}</p>
                         <p className="mt-1 text-xs text-slate-400">Frequency: {schedule.frequency}</p>
-                        <p className="mt-1 text-xs text-slate-400">Next Due: {formatDisplayDate(schedule.nextDue)}</p>
+                        <p className="mt-1 text-xs text-slate-400">Next Due: {formatInspectionDate(schedule.nextDue)}</p>
                         <p className="mt-1 text-xs text-slate-400">
-                          Last Inspection: {formatDisplayDate(schedule.lastInspectionCompletedAt)}
+                          Last Inspection: {formatInspectionDateTime(schedule.lastInspectionCompletedAt)}
                         </p>
                         <div className="mt-2 flex flex-wrap items-center gap-2">
                           <span

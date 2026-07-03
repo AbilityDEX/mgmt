@@ -1,5 +1,5 @@
 import StatusBadge from './StatusBadge'
-import { formatInspectionDateTime } from '@/lib/inspectionTime'
+import { formatInspectionDateTime, formatInspectionDate, formatInspectionTime } from '@/lib/inspectionTime'
 import Countdown from './Countdown'
 
 const ICONS: Record<string, string> = {
@@ -25,9 +25,19 @@ export default function StatusBanner({ state, dueSince, deadline, overdueBy, com
         return (
           <div className="grid gap-2">
             <p className="text-sm font-semibold">Inspection Due</p>
-            <div className="flex items-center gap-6 text-sm text-slate-200">
-              {dueSince ? <div>Due since <strong className="text-white">{formatInspectionDateTime(dueSince)}</strong></div> : null}
-              {deadline ? <div>Deadline <strong className="text-white">{formatInspectionDateTime(deadline)}</strong></div> : null}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-6 text-sm text-slate-200">
+              {dueSince ? (
+                <div>
+                  <div className="text-xs text-slate-400">Due since</div>
+                  <div className="text-white font-medium">{formatInspectionDate(dueSince)}</div>
+                </div>
+              ) : null}
+              {deadline ? (
+                <div>
+                  <div className="text-xs text-slate-400">Complete by</div>
+                  <div className="text-white font-medium">{formatInspectionTime(deadline)}</div>
+                </div>
+              ) : null}
               {deadline ? <Countdown target={deadline} /> : null}
             </div>
           </div>
@@ -36,8 +46,13 @@ export default function StatusBanner({ state, dueSince, deadline, overdueBy, com
         return (
           <div className="grid gap-2">
             <p className="text-sm font-semibold">Inspection Overdue</p>
-            <div className="flex items-center gap-6 text-sm text-slate-200">
-              {deadline ? <div>Deadline <strong className="text-white">{formatInspectionDateTime(deadline)}</strong></div> : null}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-6 text-sm text-slate-200">
+              {deadline ? (
+                <div>
+                  <div className="text-xs text-slate-400">Complete by</div>
+                  <div className="text-white font-medium">{formatInspectionTime(deadline)}</div>
+                </div>
+              ) : null}
               {overdueBy ? <div className="text-rose-300">Overdue by <strong className="text-white">{overdueBy}</strong></div> : null}
               {deadline ? <Countdown target={deadline} /> : null}
             </div>
@@ -47,10 +62,18 @@ export default function StatusBanner({ state, dueSince, deadline, overdueBy, com
         return (
           <div className="grid gap-2">
             <p className="text-sm font-semibold">Inspection Completed</p>
-            <div className="flex items-center gap-6 text-sm text-slate-200">
-              {completedAt ? <div>Completed <strong className="text-white">{formatInspectionDateTime(completedAt)}</strong></div> : null}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-6 text-sm text-slate-200">
+              {completedAt ? (
+                <div>
+                  <div className="text-xs text-slate-400">Completed</div>
+                  <div className="text-white font-medium">{formatInspectionDateTime(completedAt)}</div>
+                </div>
+              ) : null}
               {nextInspection ? (
-                <div>Next inspection <strong className="text-white">{formatInspectionDateTime(nextInspection)}</strong></div>
+                <div>
+                  <div className="text-xs text-slate-400">Next Inspection</div>
+                  <div className="text-white font-medium">{formatInspectionDate(nextInspection)}</div>
+                </div>
               ) : null}
             </div>
           </div>
@@ -60,8 +83,13 @@ export default function StatusBanner({ state, dueSince, deadline, overdueBy, com
         return (
           <div className="grid gap-2">
             <p className="text-sm font-semibold">Next Inspection</p>
-            <div className="flex items-center gap-6 text-sm text-slate-200">
-              {nextInspection ? <div>Next inspection <strong className="text-white">{formatInspectionDateTime(nextInspection)}</strong></div> : null}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-6 text-sm text-slate-200">
+              {nextInspection ? (
+                <div>
+                  <div className="text-xs text-slate-400">Next Inspection</div>
+                  <div className="text-white font-medium">{formatInspectionDate(nextInspection)}</div>
+                </div>
+              ) : null}
             </div>
           </div>
         )

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { formatInspectionDateTime, formatInspectionDate, startOfLondonDay } from '@/lib/inspectionTime'
+import { formatInspectionDateTime, formatInspectionDate, formatInspectionTime, startOfLondonDay } from '@/lib/inspectionTime'
 import StatusBanner from '@/components/StatusBanner'
 import SummaryCard from '@/components/SummaryCard'
 import { useCurrentUser } from '@/lib/store'
@@ -49,9 +49,7 @@ type InspectionExecutionsResponse = {
   inspections: InspectionHistoryEntry[]
 }
 
-function formatDisplayDate(value: string | null) {
-  return formatInspectionDateTime(value)
-}
+  // legacy helper removed; use explicit formatInspectionDate / formatInspectionTime / formatInspectionDateTime
 
 async function getToken(): Promise<string | null> {
   const { data } = await supabaseClient.auth.getSession()
@@ -171,7 +169,7 @@ export default function MachineInspectionPage() {
         if (response.status === 409) {
           await load()
           const lockError = result.nextDue
-            ? `Next inspection ${formatDisplayDate(result.nextDue)}`
+            ? `Next inspection ${formatInspectionDate(result.nextDue)}`
             : result.error
           setError(lockError || 'Failed to start inspection.')
           return
@@ -327,13 +325,13 @@ export default function MachineInspectionPage() {
             <div className="grid gap-3 sm:grid-cols-2">
               <SummaryCard title="Machine" icon="🛠️" value={machine?.name ?? '—'} sub={machine?.area ?? ''} />
               <SummaryCard title="Status" icon="🔘" value={machine?.status ?? 'Unknown'} />
-              <SummaryCard title="Last Inspection" icon="✅" value={formatDisplayDate(lastInspection?.completedAt ?? lastInspection?.startedAt ?? null)} />
-              <SummaryCard title="Next Inspection" icon="📅" value={machine?.nextScheduledAt ? formatInspectionDateTime(machine.nextScheduledAt) : null} sub={primaryTemplate?.inspectionFrequency ?? null} />
+              <SummaryCard title="Last Inspection" icon="✅" value={formatInspectionDateTime(lastInspection?.completedAt ?? lastInspection?.startedAt ?? null)} />
+              <SummaryCard title="Next Inspection Date" icon="📅" value={machine?.nextScheduledAt ? formatInspectionDate(machine.nextScheduledAt) : (primaryTemplate?.nextDue ? formatInspectionDate(primaryTemplate.nextDue) : null)} sub={primaryTemplate?.inspectionFrequency ?? null} />
             </div>
           </div>
           <div className="lg:col-span-3">
             <div className="grid gap-3 sm:grid-cols-2">
-              <SummaryCard title="Deadline" icon="⏰" value={primaryTemplate?.nextDue ? new Date(primaryTemplate.nextDue).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null} />
+              <SummaryCard title="Deadline" icon="⏰" value={primaryTemplate?.nextDue ? formatInspectionTime(primaryTemplate.nextDue) : (machine?.nextScheduledAt ? formatInspectionTime(machine.nextScheduledAt) : null)} />
               <SummaryCard title="Template" icon="📋" value={primaryTemplate?.templateName ?? 'Unassigned'} />
             </div>
           </div>
@@ -393,13 +391,13 @@ export default function MachineInspectionPage() {
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <p className="text-sm font-semibold text-white">{inspection.templateName}</p>
-                      <p className="mt-1 text-xs text-slate-400">
-                        Inspection Date: {formatDisplayDate(inspection.completedAt ?? inspection.startedAt)}
+                        <p className="mt-1 text-xs text-slate-400">
+                        Inspection Date: {formatInspectionDateTime(inspection.completedAt ?? inspection.startedAt)}
                       </p>
                       <p className="mt-1 text-xs text-slate-400">Completed By: {inspection.completedBy}</p>
                         {inspection.status === 'In Progress' && inspection.isOverdue ? (
-                          <p className="mt-1 text-xs font-semibold text-rose-300">
-                            Overdue since {formatDisplayDate(inspection.dueAt)}
+                            <p className="mt-1 text-xs font-semibold text-rose-300">
+                            Overdue since {formatInspectionDate(inspection.dueAt)}
                           </p>
                         ) : null}
                       {inspection.status === 'Completed' ? (

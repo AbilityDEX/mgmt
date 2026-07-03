@@ -46,19 +46,19 @@ function formatSchedulePreview(
 ) {
   switch (frequency) {
     case 'Daily':
-      return 'Next inspection becomes Due at the inspection time each day. Due Soon is not used for Daily schedules.'
+      return 'Next inspection is scheduled for each day and must be completed by the configured inspection time. "Due Soon" is not used for Daily schedules.'
     case 'Weekly':
-      return 'Next inspection will become due every week.'
+      return 'Next inspection is scheduled every week.'
     case 'Fortnightly':
-      return 'Next inspection will become due every fortnight.'
+      return 'Next inspection is scheduled every fortnight.'
     case 'Monthly':
-      return 'Next inspection will become due every month.'
+      return 'Next inspection is scheduled every month.'
     case 'Quarterly':
-      return 'Next inspection will become due every quarter.'
+      return 'Next inspection is scheduled every quarter.'
     case 'Six Monthly':
-      return 'Next inspection will become due every six months.'
+      return 'Next inspection is scheduled every six months.'
     case 'Annually':
-      return 'Next inspection will become due every year.'
+      return 'Next inspection is scheduled every year.'
     case 'Custom': {
       const intervalValue = customIntervalValue ?? 1
       const intervalUnit = customIntervalUnit ?? 'Days'

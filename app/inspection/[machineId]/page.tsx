@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { formatInspectionDateTime } from '@/lib/inspectionTime'
+import { formatInspectionDateTime, formatInspectionDate, startOfLondonDay } from '@/lib/inspectionTime'
+import StatusBanner from '@/components/StatusBanner'
 import { useCurrentUser } from '@/lib/store'
 import { supabaseClient } from '@/lib/supabase'
 
@@ -165,11 +166,11 @@ export default function MachineInspectionPage() {
         inspection?: { id: string }
       }
 
-      if (!response.ok || !result.inspection?.id) {
+        if (!response.ok || !result.inspection?.id) {
         if (response.status === 409) {
           await load()
           const lockError = result.nextDue
-            ? `Next inspection available on ${formatDisplayDate(result.nextDue)}`
+            ? `Next inspection ${formatDisplayDate(result.nextDue)}`
             : result.error
           setError(lockError || 'Failed to start inspection.')
           return
@@ -217,8 +218,66 @@ export default function MachineInspectionPage() {
   const hasStartableTemplate = assignedTemplates.some((template) => !template.isLocked)
   const allTemplatesLocked = assignedTemplates.length > 0 && !hasStartableTemplate
   const lockMessage = allTemplatesLocked
-    ? primaryTemplate?.lockMessage ?? (primaryTemplate?.nextDue ? `Next inspection available on ${formatDisplayDate(primaryTemplate.nextDue)}` : null)
-    : null
+      ? primaryTemplate?.lockMessage ?? (primaryTemplate?.nextDue ? `Next inspection ${formatInspectionDate(
+          startOfLondonDay(new Date(primaryTemplate.nextDue)).toISOString()
+        )}` : null)
+      : null
+
+  // Determine banner state and props
+  function formatDurationHuman(ms: number) {
+    const totalMinutes = Math.floor(ms / 60000)
+    const hours = Math.floor(totalMinutes / 60)
+    const minutes = totalMinutes % 60
+    if (hours > 0) return `${hours}h ${minutes}m`
+    return `${minutes}m`
+  }
+
+  const { bannerState, bannerProps } = useMemo(() => {
+    let state: 'Due' | 'Overdue' | 'Completed' | 'Locked' = 'Due'
+    const props: Record<string, string | null> = {}
+
+    const open = inspections.find((i) => i.status === 'In Progress')
+    if (open) {
+      if (open.isOverdue) {
+        state = 'Overdue'
+        props.dueSince = open.dueAt ?? null
+        props.deadline = open.dueAt ?? null
+        // overdueBy is computed in an effect to avoid impure calls during render
+      } else {
+        state = 'Due'
+        props.dueSince = open.dueAt ?? null
+        props.deadline = open.dueAt ?? null
+      }
+    } else if (inspections.find((i) => i.status === 'Completed')) {
+      const lastCompleted = inspections.find((i) => i.status === 'Completed')!
+      state = 'Completed'
+      props.completedAt = lastCompleted.completedAt ?? null
+      props.nextInspection = machine?.nextScheduledAt ?? null
+    } else if (primaryTemplate?.isLocked) {
+      state = 'Locked'
+      props.nextInspection = machine?.nextScheduledAt ?? primaryTemplate?.nextDue ?? null
+    } else {
+      state = 'Due'
+      props.dueSince = primaryTemplate?.nextDue ? startOfLondonDay(new Date(primaryTemplate.nextDue)).toISOString() : null
+      props.deadline = primaryTemplate?.nextDue ?? null
+    }
+
+    return { bannerState: state, bannerProps: props }
+  }, [inspections, primaryTemplate, machine?.nextScheduledAt])
+
+  const [overdueByState, setOverdueByState] = useState<string | null>(null)
+
+  useEffect(() => {
+    setOverdueByState(null)
+    if (bannerState === 'Overdue' && bannerProps.deadline) {
+      try {
+        const overdueMs = Date.now() - new Date(bannerProps.deadline).getTime()
+        if (overdueMs > 0) setOverdueByState(formatDurationHuman(overdueMs))
+      } catch {
+        setOverdueByState(null)
+      }
+    }
+  }, [bannerState, bannerProps.deadline])
 
   if (!currentUser) {
     return (
@@ -246,6 +305,17 @@ export default function MachineInspectionPage() {
           {machine?.registrationNumber ? (
             <p className="mt-1 text-sm text-slate-500">Registration: {machine.registrationNumber}</p>
           ) : null}
+        </div>
+
+        <div className="mb-6">
+          <StatusBanner
+            state={bannerState}
+            dueSince={bannerProps.dueSince ?? null}
+            deadline={bannerProps.deadline ?? null}
+            overdueBy={bannerProps.overdueBy ?? overdueByState}
+            completedAt={bannerProps.completedAt ?? null}
+            nextInspection={bannerProps.nextInspection ?? null}
+          />
         </div>
 
         {error ? <div className="mb-4 rounded-[20px] bg-rose-600/15 px-5 py-3 text-sm font-medium text-rose-300">{error}</div> : null}

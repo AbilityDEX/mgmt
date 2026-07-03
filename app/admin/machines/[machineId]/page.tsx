@@ -156,7 +156,7 @@ export default function AdminMachineDetailsPage() {
   const startLockMessage =
     allTemplatesLocked && selectedStartTemplate
       ? selectedStartTemplate.lockMessage ??
-        (selectedStartTemplate.nextDue ? `Next inspection available on ${formatDisplayDate(selectedStartTemplate.nextDue)}` : null)
+        (selectedStartTemplate.nextDue ? `Next inspection ${formatDisplayDate(selectedStartTemplate.nextDue)}` : null)
       : null
 
   const inputClass =
@@ -390,7 +390,7 @@ export default function AdminMachineDetailsPage() {
         if (response.status === 409) {
           await loadInspectionHistory()
           const lockError = payload.nextDue
-            ? `Next inspection available on ${formatDisplayDate(payload.nextDue as string)}`
+            ? `Next inspection ${formatDisplayDate(payload.nextDue as string)}`
             : payload.error
           setError(lockError || 'Failed to start inspection.')
           return

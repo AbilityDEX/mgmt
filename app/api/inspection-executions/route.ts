@@ -230,7 +230,7 @@ export async function GET(request: Request) {
         active: Boolean(assignment.active),
         nextDue,
         isLocked,
-        lockMessage: isLocked && nextDue ? `Next inspection available on ${formatInspectionDate(
+        lockMessage: isLocked && nextDue ? `Next inspection ${formatInspectionDate(
           startOfLondonDay(new Date(nextDue)).toISOString()
         )}` : null,
       }

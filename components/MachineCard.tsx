@@ -95,7 +95,10 @@ export default function MachineCard({ machine, titleHref, primaryAction, seconda
       <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 pt-4">
         <div>
           <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Inspection</p>
-          <p className="text-sm font-medium text-slate-100">{machine.inspectionDeadline}</p>
+          <div className="mt-1 flex items-center gap-3">
+            <StatusBadge label={machine.status} variant={statusVariant[machine.status]} />
+            <div className="text-sm text-slate-200">Deadline <span className="font-medium text-white">{machine.inspectionDeadline}</span></div>
+          </div>
         </div>
         <div className="flex flex-wrap gap-3">
           {secondaryAction ? <ActionButton action={secondaryAction} /> : null}

@@ -12,6 +12,7 @@ type EditState = {
   area: string
   assignedUser: string
   inspectionDeadline: string
+  unlockTime?: string
   assetId: string
   templateId?: string | null
   inspectionFrequency?: string
@@ -26,6 +27,7 @@ const emptyNew = {
   area: '',
   assignedUser: '',
   inspectionTime: '09:30',
+  unlockTime: '07:00',
   assetId: '',
   templateId: '',
   inspectionFrequency: 'Monthly',
@@ -294,6 +296,7 @@ export default function AdminMachinesPage() {
         area: machine.area,
         assignedUser: machine.assignedUser,
         inspectionDeadline: machine.inspectionDeadline,
+        unlockTime: '07:00',
         assetId: machine.assetId ?? '',
         templateId: machine.templateId ?? '',
         inspectionFrequency: machine.inspectionFrequency ?? 'Monthly',
@@ -313,107 +316,112 @@ export default function AdminMachinesPage() {
 
   const cancelEditModal = useCallback(() => {
     setIsEditOpen(false)
-    setEditState(null)
-  }, [])
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="rounded-[16px] border border-slate-800 bg-slate-950/80 p-4">
+                        <label className="block">
+                          <span className="text-sm font-medium text-slate-200">📅 Frequency</span>
+                          <select
+                            value={editState.inspectionFrequency ?? 'Monthly'}
+                            onChange={(event) =>
+                              setEditState((previous) =>
+                                previous
+                                  ? {
+                                      ...previous,
+                                      inspectionFrequency: event.target.value,
+                                      reminderDaysBeforeDue: event.target.value === 'Daily' ? 0 : (previous.reminderDaysBeforeDue ?? 7),
+                                    }
+                                  : previous
+                              )
+                            }
+                            className={inputClass}
+                          >
+                            <option value="Daily">Daily</option>
+                            <option value="Weekly">Weekly</option>
+                            <option value="Fortnightly">Fortnightly</option>
+                            <option value="Monthly">Monthly</option>
+                            <option value="Quarterly">Quarterly</option>
+                            <option value="Six Monthly">Six Monthly</option>
+                            <option value="Annually">Annually</option>
+                            <option value="Custom">Custom</option>
+                          </select>
+                          <p className="mt-2 text-sm text-slate-400">Controls how often inspections become due for this machine.</p>
+                        </label>
+                      </div>
 
-  const closeEditModal = useCallback(() => {
-    setIsEditOpen(false)
-  }, [])
+                      <div className="rounded-[16px] border border-slate-800 bg-slate-950/80 p-4">
+                        <label className="block">
+                          <span className="text-sm font-medium text-slate-200">🔓 Inspection Unlock Time</span>
+                          <input
+                            type="time"
+                            value={editState.unlockTime ?? '07:00'}
+                            onChange={(event) => setEditState((previous) => (previous ? { ...previous, unlockTime: event.target.value } : previous))}
+                            className={inputClass}
+                          />
+                          <p className="mt-2 text-sm text-slate-400">The inspection becomes available at this time for operators to start.</p>
+                        </label>
+                      </div>
+                    </div>
 
-  const load = useCallback(async () => {
-    setIsLoading(true)
-    setError(null)
-    try {
-      const token = await getToken()
-      if (!token) {
-        setError('Authentication required.')
-        return
-      }
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="rounded-[16px] border border-slate-800 bg-slate-950/80 p-4">
+                        <label className="block">
+                          <span className="text-sm font-medium text-slate-200">⏰ Completion Deadline</span>
+                          <input
+                            type="time"
+                            value={editState.inspectionDeadline}
+                            onChange={(event) => setEditState((previous) => (previous ? { ...previous, inspectionDeadline: event.target.value } : previous))}
+                            className={inputClass}
+                          />
+                          <p className="mt-2 text-sm text-slate-400">If not completed by this time the inspection becomes overdue.</p>
+                        </label>
+                      </div>
 
-      const [machinesResponse, templatesResponse] = await Promise.all([
-        fetch('/api/machines', { headers: { Authorization: `Bearer ${token}` } }),
-        fetch('/api/machine-inspection-templates?available_only=true', { headers: { Authorization: `Bearer ${token}` } }),
-      ])
+                      <div className="rounded-[16px] border border-slate-800 bg-slate-950/80 p-4">
+                        <label className="block">
+                          <span className="text-sm font-medium text-slate-200">📧 Reminder</span>
+                          {editState.inspectionFrequency === 'Daily' ? (
+                            <p className="mt-2 text-sm text-slate-400">Reminders are not used for Daily schedules.</p>
+                          ) : (
+                            <div className="mt-2">
+                              <input
+                                type="number"
+                                min="0"
+                                max="365"
+                                inputMode="numeric"
+                                value={editState.reminderDaysBeforeDue ?? 7}
+                                onChange={(event) => {
+                                  const nextValue = event.target.value === '' ? 0 : clampNumber(Number.parseInt(event.target.value, 10) || 0, 0, 365)
+                                  setEditState((previous) => (previous ? { ...previous, reminderDaysBeforeDue: nextValue } : previous))
+                                }}
+                                className={inputClass}
+                              />
+                              <p className="mt-2 text-sm text-slate-400">Users receive reminders this many days before the inspection becomes due. Set to 0 to send at the deadline.</p>
+                            </div>
+                          )}
+                        </label>
+                      </div>
+                    </div>
 
-      const machinesData = await machinesResponse.json()
-      const templatesData = await templatesResponse.json()
-
-      if (!machinesResponse.ok) {
-        setError(machinesData.error || 'Failed to load machines.')
-        return
-      }
-
-      if (!templatesResponse.ok) {
-        setError(templatesData.error || 'Failed to load templates.')
-        return
-      }
-
-      setMachines(machinesData.machines ?? [])
-      setTemplates(templatesData.templates ?? [])
-    } catch {
-      setError('Failed to load data.')
-    } finally {
-      setIsLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load()
-  }, [load])
-
-  const handleAdd = async () => {
-    if (!newMachine.name.trim()) {
-      setError('Machine name is required.')
-      return
-    }
-
-    setSaving(true)
-    setError(null)
-    try {
-      const token = await getToken()
-      if (!token) {
-        setError('Authentication required.')
-        return
-      }
-
-      const res = await fetch('/api/machines', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          name: newMachine.name.trim(),
-          area: newMachine.area,
-          assigned_user: newMachine.assignedUser,
-          inspection_deadline: newMachine.inspectionTime,
-          asset_id: newMachine.assetId,
-          template_id: newMachine.templateId?.trim() ? newMachine.templateId.trim() : null,
-          inspection_frequency: newMachine.inspectionFrequency || 'Monthly',
-          reminder_days_before_due:
-            newMachine.inspectionFrequency === 'Daily' ? 0 : (newMachine.reminderDaysBeforeDue ?? 7),
-          auto_generate_inspection: newMachine.autoGenerateInspection ?? true,
-          custom_interval_value:
-            newMachine.inspectionFrequency === 'Custom' ? clampNumber(newMachine.customIntervalValue ?? 1, 1, Number.MAX_SAFE_INTEGER) : null,
-          custom_interval_unit: newMachine.inspectionFrequency === 'Custom' ? newMachine.customIntervalUnit ?? 'Days' : null,
-        }),
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        setError(data.error || 'Failed to create machine.')
-        return
-      }
-
-      setMachines((prev) => [...prev, data.machine])
-      setNewMachine(emptyNew)
-      setIsAddOpen(false)
-      showSuccess('Machine created.')
-    } catch {
-      setError('Failed to create machine.')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleEdit = async () => {
+                    <div className="rounded-[16px] border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-100">
+                      <div className="flex items-center gap-3">
+                        <span className="text-lg">👁</span>
+                        <div>
+                          <div className="font-semibold">Schedule Preview</div>
+                          <div className="mt-1 text-sm text-emerald-100">
+                            <div>Inspection becomes available: Every {editState.inspectionFrequency ?? '—'} at {editState.unlockTime ?? '07:00'}</div>
+                            {editState.inspectionDeadline ? (
+                              <div className="mt-1">Inspection becomes overdue: {editState.inspectionDeadline}</div>
+                            ) : (
+                              <div className="mt-1 text-slate-300">No completion deadline configured. Inspection will never become overdue.</div>
+                            )}
+                            {editState.inspectionDeadline && editState.inspectionFrequency !== 'Daily' ? (
+                              <div className="mt-1">Reminder: {editState.reminderDaysBeforeDue} day(s) before deadline</div>
+                            ) : null}
+                            <div className="mt-2 text-xs text-emerald-200">Workflow: Locked ↓ Due ↓ Overdue ↓ Completed</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
     if (!editState) return
 
     setSaving(true)
@@ -676,106 +684,115 @@ export default function AdminMachinesPage() {
                 aria-expanded={isSchedulingExpanded}
               >
                 <div>
-                  <p className="text-sm font-semibold text-white">Scheduling</p>
-                  <p className="mt-1 text-sm text-slate-400">Controls when this machine becomes due.</p>
+                  <p className="text-sm font-semibold text-white">Inspection Schedule</p>
+                  <p className="mt-1 text-sm text-slate-400">Controls when staff can start inspections, when they're due, and when reminders are sent.</p>
                 </div>
                 <span className="text-sm font-semibold text-emerald-400">{isSchedulingExpanded ? '▲' : '▼'}</span>
               </button>
 
               {isSchedulingExpanded ? (
                 <div className="mt-5 space-y-5">
-                  <label className="block">
-                    <span className="text-sm font-medium text-slate-200">Inspection Frequency</span>
-                    <select
-                      value={newMachine.inspectionFrequency}
-                      onChange={(event) =>
-                        setNewMachine((previous) => ({
-                          ...previous,
-                          inspectionFrequency: event.target.value,
-                          reminderDaysBeforeDue: event.target.value === 'Daily' ? 0 : (previous.reminderDaysBeforeDue ?? 7),
-                        }))
-                      }
-                      className={inputClass}
-                    >
-                      <option value="Daily">Daily</option>
-                      <option value="Weekly">Weekly</option>
-                      <option value="Fortnightly">Fortnightly</option>
-                      <option value="Monthly">Monthly</option>
-                      <option value="Quarterly">Quarterly</option>
-                      <option value="Six Monthly">Six Monthly</option>
-                      <option value="Annually">Annually</option>
-                      <option value="Custom">Custom</option>
-                    </select>
-                    <p className="mt-2 text-sm text-slate-400">Controls how often inspections become due for this machine.</p>
-                  </label>
-
-                  {newMachine.inspectionFrequency !== 'Daily' ? (
-                    <label className="block">
-                      <span className="text-sm font-medium text-slate-200">Reminder Days Before Due</span>
-                      <input
-                        type="number"
-                        min="0"
-                        max="365"
-                        inputMode="numeric"
-                        value={newMachine.reminderDaysBeforeDue ?? 7}
-                        onChange={(event) => {
-                          const nextValue = event.target.value === '' ? 0 : clampNumber(Number.parseInt(event.target.value, 10) || 0, 0, 365)
-                          setNewMachine((previous) => ({ ...previous, reminderDaysBeforeDue: nextValue }))
-                        }}
-                        className={inputClass}
-                      />
-                      <p className="mt-2 text-sm text-slate-400">Users receive reminders this many days before the inspection becomes due.</p>
-                    </label>
-                  ) : null}
-
-                  <label className="flex items-start gap-3 rounded-[20px] border border-slate-800 bg-slate-950/80 px-4 py-4">
-                    <input
-                      type="checkbox"
-                      checked={newMachine.autoGenerateInspection ?? true}
-                      onChange={(event) =>
-                        setNewMachine((previous) => ({ ...previous, autoGenerateInspection: event.target.checked }))
-                      }
-                      className="mt-1 rounded border border-slate-700"
-                    />
-                    <span>
-                      <span className="block text-sm font-medium text-slate-200">Auto Generate Next Inspection</span>
-                      <span className="mt-1 block text-sm text-slate-400">Create the next inspection automatically when the current one is completed.</span>
-                    </span>
-                  </label>
-
-                  {newMachine.inspectionFrequency === 'Custom' ? (
-                    <div className="grid gap-5 md:grid-cols-2">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="rounded-[16px] border border-slate-800 bg-slate-950/80 p-4">
                       <label className="block">
-                        <span className="text-sm font-medium text-slate-200">Custom Interval Value</span>
-                        <input
-                          type="number"
-                          min="1"
-                          inputMode="numeric"
-                          value={newMachine.customIntervalValue ?? 1}
-                          onChange={(event) => {
-                            const nextValue = event.target.value === '' ? 1 : Math.max(1, Number.parseInt(event.target.value, 10) || 1)
-                            setNewMachine((previous) => ({ ...previous, customIntervalValue: nextValue }))
-                          }}
-                          className={inputClass}
-                        />
-                      </label>
-                      <label className="block">
-                        <span className="text-sm font-medium text-slate-200">Custom Interval Unit</span>
+                        <span className="text-sm font-medium text-slate-200">📅 Frequency</span>
                         <select
-                          value={newMachine.customIntervalUnit ?? 'Days'}
-                          onChange={(event) => setNewMachine((previous) => ({ ...previous, customIntervalUnit: event.target.value }))}
+                          value={newMachine.inspectionFrequency}
+                          onChange={(event) =>
+                            setNewMachine((previous) => ({
+                              ...previous,
+                              inspectionFrequency: event.target.value,
+                              reminderDaysBeforeDue: event.target.value === 'Daily' ? 0 : (previous.reminderDaysBeforeDue ?? 7),
+                            }))
+                          }
                           className={inputClass}
                         >
-                          <option value="Days">Days</option>
-                          <option value="Weeks">Weeks</option>
-                          <option value="Months">Months</option>
+                          <option value="Daily">Daily</option>
+                          <option value="Weekly">Weekly</option>
+                          <option value="Fortnightly">Fortnightly</option>
+                          <option value="Monthly">Monthly</option>
+                          <option value="Quarterly">Quarterly</option>
+                          <option value="Six Monthly">Six Monthly</option>
+                          <option value="Annually">Annually</option>
+                          <option value="Custom">Custom</option>
                         </select>
+                        <p className="mt-2 text-sm text-slate-400">Controls how often inspections become due for this machine.</p>
                       </label>
                     </div>
-                  ) : null}
 
-                  <div className="rounded-[20px] border border-emerald-500/20 bg-emerald-500/10 px-4 py-4 text-sm text-emerald-100">
-                    {addSchedulePreview}
+                    <div className="rounded-[16px] border border-slate-800 bg-slate-950/80 p-4">
+                      <label className="block">
+                        <span className="text-sm font-medium text-slate-200">🔓 Inspection Unlock Time</span>
+                        <input
+                          type="time"
+                          value={newMachine.unlockTime}
+                          onChange={(event) => setNewMachine((previous) => ({ ...previous, unlockTime: event.target.value }))}
+                          className={inputClass}
+                        />
+                        <p className="mt-2 text-sm text-slate-400">The inspection becomes available at this time for operators to start.</p>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="rounded-[16px] border border-slate-800 bg-slate-950/80 p-4">
+                      <label className="block">
+                        <span className="text-sm font-medium text-slate-200">⏰ Completion Deadline</span>
+                        <input
+                          type="time"
+                          value={newMachine.inspectionTime}
+                          onChange={(event) => setNewMachine((previous) => ({ ...previous, inspectionTime: event.target.value }))}
+                          className={inputClass}
+                        />
+                        <p className="mt-2 text-sm text-slate-400">If not completed by this time the inspection becomes overdue.</p>
+                      </label>
+                    </div>
+
+                    <div className="rounded-[16px] border border-slate-800 bg-slate-950/80 p-4">
+                      <label className="block">
+                        <span className="text-sm font-medium text-slate-200">📧 Reminder</span>
+                        {newMachine.inspectionFrequency === 'Daily' ? (
+                          <p className="mt-2 text-sm text-slate-400">Reminders are not used for Daily schedules.</p>
+                        ) : (
+                          <div className="mt-2">
+                            <input
+                              type="number"
+                              min="0"
+                              max="365"
+                              inputMode="numeric"
+                              value={newMachine.reminderDaysBeforeDue ?? 7}
+                              onChange={(event) => {
+                                const nextValue = event.target.value === '' ? 0 : clampNumber(Number.parseInt(event.target.value, 10) || 0, 0, 365)
+                                setNewMachine((previous) => ({ ...previous, reminderDaysBeforeDue: nextValue }))
+                              }}
+                              className={inputClass}
+                            />
+                            <p className="mt-2 text-sm text-slate-400">Users receive reminders this many days before the inspection becomes due. Set to 0 to send at the deadline.</p>
+                          </div>
+                        )}
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="rounded-[16px] border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-100">
+                    <div className="flex items-center gap-3">
+                      <span className="text-lg">👁</span>
+                      <div>
+                        <div className="font-semibold">Schedule Preview</div>
+                        <div className="mt-1 text-sm text-emerald-100">
+                          <div>Inspection becomes available: Every {newMachine.inspectionFrequency} at {newMachine.unlockTime}</div>
+                          {newMachine.inspectionTime ? (
+                            <div className="mt-1">Inspection becomes overdue: {newMachine.inspectionTime}</div>
+                          ) : (
+                            <div className="mt-1 text-slate-300">No completion deadline configured. Inspection will never become overdue.</div>
+                          )}
+                          {newMachine.inspectionTime && newMachine.inspectionFrequency !== 'Daily' ? (
+                            <div className="mt-1">Reminder: {newMachine.reminderDaysBeforeDue} day(s) before deadline</div>
+                          ) : null}
+                          <div className="mt-2 text-xs text-emerald-200">Workflow: Locked ↓ Due ↓ Overdue ↓ Completed</div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               ) : null}

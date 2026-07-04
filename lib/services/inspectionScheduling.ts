@@ -138,6 +138,16 @@ type ScheduleOverviewRow = {
   machineId: string
   machineName: string
   machineInspectionDeadline: string | null
+  unlockTime: string | null
+  deadlineTime: string | null
+  reminderOffsetMinutes: number | null
+  schedulePreview: {
+    frequency: ScheduleFrequency | string
+    unlockTime: string | null
+    deadlineTime: string | null
+    reminderTime: string | null
+    statusFlow: string
+  }
   templateId: string
   templateName: string
   frequency: ScheduleFrequency
@@ -361,14 +371,14 @@ async function ensureGeneratedInspectionForSchedule(params: {
   } satisfies GeneratedInspectionResult
 }
 
-async function getInspectionDeadlineForMachineTemplate(machineTemplateId: string) {
+async function getMachineScheduleDefaults(machineTemplateId: string) {
   if (!supabaseAdmin) {
     throw new Error(serverConfigErrorMessage)
   }
 
   const { data, error } = await supabaseAdmin
     .from('machine_inspection_templates')
-    .select('machines(inspection_deadline)')
+    .select('machines(inspection_deadline, reminder_days_before_due)')
     .eq('id', machineTemplateId)
     .maybeSingle()
 
@@ -378,7 +388,15 @@ async function getInspectionDeadlineForMachineTemplate(machineTemplateId: string
 
   const machineRelation = data?.machines
   const machine = Array.isArray(machineRelation) ? (machineRelation[0] ?? null) : machineRelation
-  return (machine?.inspection_deadline as string | null | undefined) ?? '09:00'
+
+  const unlockTime = (machine?.inspection_deadline as string | null | undefined) ?? null
+  const reminderDays = machine?.reminder_days_before_due as number | null | undefined
+
+  return {
+    unlockTime,
+    deadlineTime: null as string | null,
+    reminderOffsetMinutes: Number.isFinite(Number(reminderDays)) ? Number(reminderDays) * 24 * 60 : null,
+  }
 }
 
 export async function ensureScheduleForMachineTemplate(params: {
@@ -394,7 +412,8 @@ export async function ensureScheduleForMachineTemplate(params: {
   }
 
   const intervalValue = Math.max(1, params.intervalValue ?? 1)
-  const inspectionTime = await getInspectionDeadlineForMachineTemplate(params.machineTemplateId)
+  const defaults = await getMachineScheduleDefaults(params.machineTemplateId)
+  const inspectionTime = defaults.unlockTime ?? '09:00'
   const base = params.nextDue ?? new Date()
   const nextDue = params.nextDue ?? calculateNextDue({
     frequency: params.frequency,
@@ -427,6 +446,9 @@ export async function ensureScheduleForMachineTemplate(params: {
           interval_value: intervalValue,
           custom_cron: params.customCron?.trim() || null,
           next_due: normalizedNextDue.toISOString(),
+          unlock_time: defaults.unlockTime ?? null,
+          deadline_time: defaults.deadlineTime ?? null,
+          reminder_offset_minutes: defaults.reminderOffsetMinutes ?? null,
           active: params.active ?? true,
         },
       ])
@@ -447,6 +469,9 @@ export async function ensureScheduleForMachineTemplate(params: {
       interval_value: intervalValue,
       custom_cron: params.customCron?.trim() || null,
       next_due: normalizedNextDue.toISOString(),
+      unlock_time: defaults.unlockTime ?? null,
+      deadline_time: defaults.deadlineTime ?? null,
+      reminder_offset_minutes: defaults.reminderOffsetMinutes ?? null,
       active: params.active ?? true,
     })
     .eq('id', existingSchedule.id as string)
@@ -1127,6 +1152,11 @@ export async function getScheduleOverview(now = new Date()) {
       machineId: machine.id,
       machineName: machine.name,
       machineInspectionDeadline: machine.inspection_deadline,
+      unlockTime: machine.inspection_deadline ?? null,
+      deadlineTime: null,
+      reminderOffsetMinutes: machine.reminder_days_before_due !== null && machine.reminder_days_before_due !== undefined
+        ? Number(machine.reminder_days_before_due) * 24 * 60
+        : null,
       templateId: template.id,
       templateName: template.name,
       frequency: schedule.frequency,
@@ -1151,6 +1181,13 @@ export async function getScheduleOverview(now = new Date()) {
         schedulerDecision: `computed_status=${status}; frequency=${schedule.frequency}`,
         apiDecision: now < window.dueStart ? 'start_locked_until_due_day' : 'start_allowed',
         dbDecision: `machine_status=${machine.status ?? 'Unknown'}; schedule_active=${Boolean(schedule.active)}`,
+      },
+      schedulePreview: {
+        frequency: schedule.frequency,
+        unlockTime: machine.inspection_deadline ?? null,
+        deadlineTime: null,
+        reminderTime: dueSoonTime ? formatInspectionDateTime(dueSoonTime) : null,
+        statusFlow: 'Locked ↓ Due (' + (machine.inspection_deadline ?? '09:00') + ') ↓ Overdue (TBD) ↓ Completed',
       },
     })
   }
@@ -1277,12 +1314,13 @@ export async function advanceScheduleFromCompletedInspection(params: {
     return { advanced: false as const, reason: 'schedule_not_found_or_inactive' as const }
   }
 
+  const defaults = await getMachineScheduleDefaults(scheduleData.machine_template_id as string)
   const nextDue = calculateNextDue({
     frequency: scheduleData.frequency as ScheduleFrequency,
     intervalValue: Number(scheduleData.interval_value ?? 1),
     customCron: (scheduleData.custom_cron as string | null) ?? null,
     fromDate: params.completedAt,
-    inspectionTime: await getInspectionDeadlineForMachineTemplate(scheduleData.machine_template_id as string),
+    inspectionTime: defaults.unlockTime ?? '09:00',
   })
 
   const { error: updateError } = await supabaseAdmin

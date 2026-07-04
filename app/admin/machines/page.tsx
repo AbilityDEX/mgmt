@@ -371,6 +371,53 @@ export default function AdminMachinesPage() {
     }
   }
 
+  const load = useCallback(async () => {
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      const { data } = await supabaseClient.auth.getSession()
+      const token = data.session?.access_token
+      if (!token) {
+        setError('Authentication required.')
+        setIsLoading(false)
+        return
+      }
+
+      const [machinesRes, templatesRes] = await Promise.all([
+        fetch('/api/machines', { headers: { Authorization: `Bearer ${token}` } }),
+        fetch('/api/inspection-templates', { headers: { Authorization: `Bearer ${token}` } }),
+      ])
+
+      const machinesPayload = await machinesRes.json()
+      const templatesPayload = await templatesRes.json()
+
+      if (!machinesRes.ok) {
+        setError(machinesPayload.error || 'Failed to load machines.')
+        setIsLoading(false)
+        return
+      }
+
+      if (!templatesRes.ok) {
+        setError(templatesPayload.error || 'Failed to load templates.')
+        setIsLoading(false)
+        return
+      }
+
+      setMachines(machinesPayload.machines ?? [])
+      setTemplates(templatesPayload.templates ?? [])
+    } catch (err) {
+      setError('Failed to load machines.')
+    } finally {
+      setIsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void load()
+  }, [load])
+
   const handleDelete = async (machineId: string) => {
     setError(null)
     try {
@@ -636,7 +683,7 @@ export default function AdminMachinesPage() {
               >
                 <div>
                   <p className="text-sm font-semibold text-white">Inspection Schedule</p>
-                  <p className="mt-1 text-sm text-slate-400">Controls when staff can start inspections, when they're due, and when reminders are sent.</p>
+                  <p className="mt-1 text-sm text-slate-400">Controls when staff can start inspections, when they are due, and when reminders are sent.</p>
                 </div>
                 <span className="text-sm font-semibold text-emerald-400">{isSchedulingExpanded ? '▲' : '▼'}</span>
               </button>

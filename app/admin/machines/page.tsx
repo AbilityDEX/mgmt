@@ -316,112 +316,15 @@ export default function AdminMachinesPage() {
 
   const cancelEditModal = useCallback(() => {
     setIsEditOpen(false)
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <div className="rounded-[16px] border border-slate-800 bg-slate-950/80 p-4">
-                        <label className="block">
-                          <span className="text-sm font-medium text-slate-200">📅 Frequency</span>
-                          <select
-                            value={editState.inspectionFrequency ?? 'Monthly'}
-                            onChange={(event) =>
-                              setEditState((previous) =>
-                                previous
-                                  ? {
-                                      ...previous,
-                                      inspectionFrequency: event.target.value,
-                                      reminderDaysBeforeDue: event.target.value === 'Daily' ? 0 : (previous.reminderDaysBeforeDue ?? 7),
-                                    }
-                                  : previous
-                              )
-                            }
-                            className={inputClass}
-                          >
-                            <option value="Daily">Daily</option>
-                            <option value="Weekly">Weekly</option>
-                            <option value="Fortnightly">Fortnightly</option>
-                            <option value="Monthly">Monthly</option>
-                            <option value="Quarterly">Quarterly</option>
-                            <option value="Six Monthly">Six Monthly</option>
-                            <option value="Annually">Annually</option>
-                            <option value="Custom">Custom</option>
-                          </select>
-                          <p className="mt-2 text-sm text-slate-400">Controls how often inspections become due for this machine.</p>
-                        </label>
-                      </div>
+    setEditState(null)
+  }, [])
 
-                      <div className="rounded-[16px] border border-slate-800 bg-slate-950/80 p-4">
-                        <label className="block">
-                          <span className="text-sm font-medium text-slate-200">🔓 Inspection Unlock Time</span>
-                          <input
-                            type="time"
-                            value={editState.unlockTime ?? '07:00'}
-                            onChange={(event) => setEditState((previous) => (previous ? { ...previous, unlockTime: event.target.value } : previous))}
-                            className={inputClass}
-                          />
-                          <p className="mt-2 text-sm text-slate-400">The inspection becomes available at this time for operators to start.</p>
-                        </label>
-                      </div>
-                    </div>
+  const closeEditModal = cancelEditModal
 
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <div className="rounded-[16px] border border-slate-800 bg-slate-950/80 p-4">
-                        <label className="block">
-                          <span className="text-sm font-medium text-slate-200">⏰ Completion Deadline</span>
-                          <input
-                            type="time"
-                            value={editState.inspectionDeadline}
-                            onChange={(event) => setEditState((previous) => (previous ? { ...previous, inspectionDeadline: event.target.value } : previous))}
-                            className={inputClass}
-                          />
-                          <p className="mt-2 text-sm text-slate-400">If not completed by this time the inspection becomes overdue.</p>
-                        </label>
-                      </div>
+  const handleEdit = async () => {
+  
 
-                      <div className="rounded-[16px] border border-slate-800 bg-slate-950/80 p-4">
-                        <label className="block">
-                          <span className="text-sm font-medium text-slate-200">📧 Reminder</span>
-                          {editState.inspectionFrequency === 'Daily' ? (
-                            <p className="mt-2 text-sm text-slate-400">Reminders are not used for Daily schedules.</p>
-                          ) : (
-                            <div className="mt-2">
-                              <input
-                                type="number"
-                                min="0"
-                                max="365"
-                                inputMode="numeric"
-                                value={editState.reminderDaysBeforeDue ?? 7}
-                                onChange={(event) => {
-                                  const nextValue = event.target.value === '' ? 0 : clampNumber(Number.parseInt(event.target.value, 10) || 0, 0, 365)
-                                  setEditState((previous) => (previous ? { ...previous, reminderDaysBeforeDue: nextValue } : previous))
-                                }}
-                                className={inputClass}
-                              />
-                              <p className="mt-2 text-sm text-slate-400">Users receive reminders this many days before the inspection becomes due. Set to 0 to send at the deadline.</p>
-                            </div>
-                          )}
-                        </label>
-                      </div>
-                    </div>
-
-                    <div className="rounded-[16px] border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-100">
-                      <div className="flex items-center gap-3">
-                        <span className="text-lg">👁</span>
-                        <div>
-                          <div className="font-semibold">Schedule Preview</div>
-                          <div className="mt-1 text-sm text-emerald-100">
-                            <div>Inspection becomes available: Every {editState.inspectionFrequency ?? '—'} at {editState.unlockTime ?? '07:00'}</div>
-                            {editState.inspectionDeadline ? (
-                              <div className="mt-1">Inspection becomes overdue: {editState.inspectionDeadline}</div>
-                            ) : (
-                              <div className="mt-1 text-slate-300">No completion deadline configured. Inspection will never become overdue.</div>
-                            )}
-                            {editState.inspectionDeadline && editState.inspectionFrequency !== 'Daily' ? (
-                              <div className="mt-1">Reminder: {editState.reminderDaysBeforeDue} day(s) before deadline</div>
-                            ) : null}
-                            <div className="mt-2 text-xs text-emerald-200">Workflow: Locked ↓ Due ↓ Overdue ↓ Completed</div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
+    
     if (!editState) return
 
     setSaving(true)
@@ -490,6 +393,54 @@ export default function AdminMachinesPage() {
       showSuccess('Machine deleted.')
     } catch {
       setError('Failed to delete machine.')
+    }
+  }
+
+  const handleAdd = async () => {
+    if (!newMachine.name.trim()) {
+      setError('Machine name is required.')
+      return
+    }
+
+    setSaving(true)
+    setError(null)
+    try {
+      const token = await getToken()
+      if (!token) {
+        setError('Authentication required.')
+        return
+      }
+      const res = await fetch('/api/machines', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          name: newMachine.name.trim(),
+          area: newMachine.area,
+          assigned_user: newMachine.assignedUser,
+          inspection_time: newMachine.inspectionTime,
+          unlock_time: newMachine.unlockTime,
+          asset_id: newMachine.assetId || null,
+          template_id: newMachine.templateId === '' ? null : newMachine.templateId,
+          inspection_frequency: newMachine.inspectionFrequency || 'Monthly',
+          reminder_days_before_due: newMachine.inspectionFrequency === 'Daily' ? 0 : (newMachine.reminderDaysBeforeDue ?? 7),
+          auto_generate_inspection: newMachine.autoGenerateInspection ?? true,
+          custom_interval_value: newMachine.inspectionFrequency === 'Custom' ? clampNumber(newMachine.customIntervalValue ?? 1, 1, Number.MAX_SAFE_INTEGER) : null,
+          custom_interval_unit: newMachine.inspectionFrequency === 'Custom' ? newMachine.customIntervalUnit ?? 'Days' : null,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data.error || 'Failed to create machine.')
+        return
+      }
+      setMachines((prev) => [data.machine, ...prev])
+      setIsAddOpen(false)
+      setNewMachine(emptyNew)
+      showSuccess('Machine created.')
+    } catch {
+      setError('Failed to create machine.')
+    } finally {
+      setSaving(false)
     }
   }
 

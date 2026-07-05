@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { requireAdmin } from '@/lib/admin'
+import { requireAdmin, supabaseAdmin } from '@/lib/admin'
 import { getRetentionSettings, updateRetentionSettings } from '@/lib/services/retention'
 
 export async function GET(request: Request) {
@@ -8,7 +8,15 @@ export async function GET(request: Request) {
 
   try {
     const settings = await getRetentionSettings()
-    return NextResponse.json({ settings })
+    // compute some simple stats for the admin UI
+    if (!supabaseAdmin) {
+      return NextResponse.json({ settings, stats: { archivedCount: 0, pendingCount: 0 } })
+    }
+
+    const { data: archivedRows } = await supabaseAdmin.from('inspections').select('id', { count: 'exact' }).eq('archive_status', 'archived')
+    const { data: pendingRows } = await supabaseAdmin.from('inspections').select('id', { count: 'exact' }).neq('archive_status', 'archived')
+
+    return NextResponse.json({ settings, stats: { archivedCount: archivedRows?.length ?? 0, pendingCount: pendingRows?.length ?? 0 } })
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to load settings.' }, { status: 500 })
   }

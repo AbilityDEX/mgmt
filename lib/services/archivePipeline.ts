@@ -174,6 +174,42 @@ async function loadInspectionArchiveData(inspectionId: string) {
     }
   }
 
+  // Convert storage paths to temporary signed URLs so PDF generator can fetch them.
+  if (photoByItemId.size > 0) {
+    const BUCKET = 'inspection-photos'
+    for (const [itemId, photos] of Array.from(photoByItemId.entries())) {
+      for (let i = 0; i < photos.length; i += 1) {
+        const p = photos[i]
+        const storagePath = p.url
+        if (!storagePath) continue
+        try {
+          // Try to download raw bytes and embed as data URL for reliable PDF embedding
+          const { data: dl, error: dlErr } = await supabaseAdmin.storage.from(BUCKET).download(storagePath)
+          if (!dlErr && dl) {
+            const bytes = Buffer.from(await dl.arrayBuffer())
+            // Infer mime type from extension
+            let mime = 'application/octet-stream'
+            if (storagePath.toLowerCase().endsWith('.png')) mime = 'image/png'
+            else if (storagePath.toLowerCase().endsWith('.jpg') || storagePath.toLowerCase().endsWith('.jpeg')) mime = 'image/jpeg'
+            else if (storagePath.toLowerCase().endsWith('.webp')) mime = 'image/webp'
+            p.url = `data:${mime};base64,${bytes.toString('base64')}`
+          } else {
+            // Fallback to signed URL when direct download fails
+            const { data: signed, error: signErr } = await supabaseAdmin.storage.from(BUCKET).createSignedUrl(storagePath, 60 * 60)
+            if (!signErr && signed?.signedUrl) {
+              p.url = signed.signedUrl
+            } else {
+              console.warn('[archive-pipeline] failed to create signed URL for', storagePath, signErr?.message)
+            }
+          }
+        } catch (e) {
+          console.warn('[archive-pipeline] exception creating signed URL for', storagePath, e)
+        }
+      }
+      photoByItemId.set(itemId, photos)
+    }
+  }
+
   const { data: defectsData, error: defectsError } = await supabaseAdmin
     .from('defects')
     .select('id, title, severity, status, description')

@@ -8,6 +8,7 @@ type InspectionQuestionProps = {
   isReadOnly?: boolean
   onAnswerChange?: (itemId: string, answer: string | null, comments?: string | null) => void
   onPhotoUpload?: (itemId: string, photoData: { file?: File; url?: string; caption?: string }) => void
+  onPhotoDelete?: (itemId: string, photoId: string) => void
   onSignatureCapture?: (itemId: string, signatureData: string) => void
 }
 
@@ -16,6 +17,7 @@ export default function InspectionQuestion({
   isReadOnly = false,
   onAnswerChange,
   onPhotoUpload,
+  onPhotoDelete,
   onSignatureCapture,
 }: InspectionQuestionProps) {
   const [localAnswer, setLocalAnswer] = useState<string | null>(item.answer)
@@ -23,6 +25,8 @@ export default function InspectionQuestion({
   const [showComments, setShowComments] = useState(item.answer === 'fail')
   const [isCapturingSignature, setIsCapturingSignature] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [viewerOpen, setViewerOpen] = useState(false)
+  const [viewerIndex, setViewerIndex] = useState<number>(0)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   const inputClass =
@@ -315,32 +319,36 @@ export default function InspectionQuestion({
           <div className="space-y-3">
             {baseQuestion}
             {item.photoRequired && <p className="text-xs text-amber-400">Photo required</p>}
-            <div className="rounded-3xl border-2 border-dashed border-slate-700 bg-slate-950/50 p-6 text-center">
-              {(item.photos ?? []).length > 0 ? (
-                <div className="space-y-3">
-                  <p className="text-sm font-semibold text-emerald-400">
-                    {(item.photos ?? []).length} photo(s) uploaded
-                  </p>
-                  {!isReadOnly && (
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="rounded-2xl bg-emerald-600/15 px-4 py-2 text-sm font-semibold text-emerald-300 hover:bg-emerald-600/25"
-                    >
-                      Add Photo
-                    </button>
-                  )}
+            <div className="rounded-3xl border-2 border-dashed border-slate-700 bg-slate-950/50 p-4">
+              <div className="flex items-center justify-between px-3">
+                <p className="text-sm font-semibold text-emerald-400">{(item.photos ?? []).length} photo(s)</p>
+                {!isReadOnly && (
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="rounded-2xl bg-emerald-600/15 px-3 py-1 text-sm font-semibold text-emerald-300 hover:bg-emerald-600/25"
+                  >
+                    Add Photo
+                  </button>
+                )}
+              </div>
+              <div className="mt-3 px-3">
+                <div className="flex gap-2 overflow-x-auto pb-3">
+                  {(item.photos ?? []).map((p) => (
+                    <div key={p.id} className="relative flex-shrink-0">
+                      <img
+                        src={p.url}
+                        alt={p.caption ?? 'Inspection photo'}
+                        className="h-20 w-20 rounded-md object-cover cursor-pointer"
+                        onClick={() => {
+                          setViewerIndex((item.photos ?? []).findIndex((x) => x.id === p.id))
+                          setViewerOpen(true)
+                        }}
+                      />
+                    </div>
+                  ))}
                 </div>
-              ) : (
-                <button
-                  type="button"
-                  disabled={isReadOnly}
-                  onClick={() => fileInputRef.current?.click()}
-                  className="rounded-2xl bg-slate-800 px-4 py-3 text-sm font-semibold text-slate-100 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  📸 Tap to upload photo
-                </button>
-              )}
+              </div>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -349,13 +357,10 @@ export default function InspectionQuestion({
                 className="hidden"
                 onChange={(e) => {
                   if (e.target.files?.[0]) {
-                    const reader = new FileReader()
-                    reader.onload = (event) => {
-                      const url = event.target?.result as string
-                      onPhotoUpload?.(item.id, { url })
-                      handleAnswerChange('captured')
-                    }
-                    reader.readAsDataURL(e.target.files[0])
+                    const f = e.target.files[0]
+                    onPhotoUpload?.(item.id, { file: f })
+                    handleAnswerChange('captured')
+                    if (e.target) e.target.value = ''
                   }
                 }}
               />
@@ -473,6 +478,36 @@ export default function InspectionQuestion({
   return (
     <div className="rounded-[24px] border border-slate-800 bg-slate-900/95 p-4 shadow-[0_18px_40px_rgba(0,0,0,0.22)]">
       {renderQuestion()}
+
+      {viewerOpen && (item.photos ?? []).length > 0 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80">
+          <div className="relative max-w-[90%] max-h-[90%] w-full">
+            <button className="absolute right-3 top-3 z-50 rounded-full bg-slate-800/60 p-2" onClick={() => setViewerOpen(false)}>Close</button>
+            <div className="flex items-center justify-center">
+              <button className="mx-2 p-2 text-white" onClick={() => setViewerIndex((i) => Math.max(0, i - 1))}>◀</button>
+              <img src={(item.photos ?? [])[viewerIndex]?.url} alt="photo" className="max-h-[80vh] max-w-full object-contain" />
+              <button className="mx-2 p-2 text-white" onClick={() => setViewerIndex((i) => Math.min((item.photos ?? []).length - 1, i + 1))}>▶</button>
+            </div>
+            <div className="mt-3 flex items-center justify-center gap-3">
+              <a href={(item.photos ?? [])[viewerIndex]?.url} target="_blank" rel="noreferrer" download className="rounded-2xl bg-slate-800 px-4 py-2 text-sm text-slate-100">Download</a>
+              {!isReadOnly && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const pid = (item.photos ?? [])[viewerIndex]?.id
+                    if (!pid) return
+                    await onPhotoDelete?.(item.id, pid)
+                    setViewerOpen(false)
+                  }}
+                  className="rounded-2xl bg-rose-600 px-4 py-2 text-sm text-white"
+                >
+                  Delete
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

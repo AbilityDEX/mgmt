@@ -312,6 +312,34 @@ export default function InspectionExecutionPage() {
     }
   }
 
+  const deletePhoto = async (itemId: string, photoId: string) => {
+    if (!inspection) return
+    setError(null)
+    try {
+      const token = await getToken()
+      if (!token) {
+        setError('Authentication required.')
+        return
+      }
+
+      const resp = await fetch(`/api/inspection-photos/${encodeURIComponent(photoId)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+
+      if (!resp.ok) {
+        const payload = await resp.json().catch(() => ({}))
+        setError(payload.error || 'Failed to delete photo.')
+        return
+      }
+
+      // Reload inspection to regenerate signed URLs
+      await load()
+    } catch {
+      setError('Failed to delete photo.')
+    }
+  }
+
   const handleComplete = async () => {
     if (!inspection || isReadOnly || completing) return
 
@@ -528,6 +556,9 @@ export default function InspectionExecutionPage() {
                       }}
                       onPhotoUpload={(itemId, photoData) => {
                         void uploadPhoto(itemId, photoData)
+                      }}
+                      onPhotoDelete={(itemId, photoId) => {
+                        void deletePhoto(itemId, photoId)
                       }}
                     />
                     {validationErrors[item.id] && (

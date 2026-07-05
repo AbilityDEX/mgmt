@@ -54,6 +54,12 @@ export type InspectionItem = {
   expectedAnswer?: string
   photoRequired: boolean
   signatureRequired: boolean
+  // Behaviour flags from the template
+  failRequireComment?: boolean
+  failAllowPhotos?: boolean
+  failRequirePhotos?: boolean
+  passAllowPhotos?: boolean
+  photoMaxCount?: number
   
   // Runtime state
   answer: string | null

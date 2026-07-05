@@ -17,6 +17,11 @@ type TemplateItemRow = {
   required: boolean
   display_order: number
   created_at: string
+  fail_require_comment?: boolean
+  fail_allow_photos?: boolean
+  fail_require_photos?: boolean
+  pass_allow_photos?: boolean
+  photo_max_count?: number
 }
 
 type InspectionQuestionType =
@@ -24,6 +29,10 @@ type InspectionQuestionType =
   | 'yes_no'
   | 'text'
   | 'number'
+  | 'decimal'
+  | 'long_notes'
+  | 'multiple_choice'
+  | 'dropdown'
   | 'photo'
   | 'signature'
 
@@ -31,13 +40,35 @@ const defaultQuestionType: InspectionQuestionType = 'pass_fail'
 
 type CreateTemplateBody = {
   name?: string
-  items?: Array<{ question?: string; description?: string | null; question_type?: InspectionQuestionType }>
+  items?: Array<{
+    question?: string
+    description?: string | null
+    question_type?: InspectionQuestionType
+    required?: boolean
+    fail_require_comment?: boolean
+    fail_allow_photos?: boolean
+    fail_require_photos?: boolean
+    pass_allow_photos?: boolean
+    photo_max_count?: number
+  }>
 }
 
 type UpdateTemplateBody = {
   name?: string
   description?: string | null
-  items?: Array<{ id?: string; question?: string; description?: string | null; question_type?: InspectionQuestionType; required?: boolean; display_order?: number }>
+  items?: Array<{
+    id?: string
+    question?: string
+    description?: string | null
+    question_type?: InspectionQuestionType
+    required?: boolean
+    display_order?: number
+    fail_require_comment?: boolean
+    fail_allow_photos?: boolean
+    fail_require_photos?: boolean
+    pass_allow_photos?: boolean
+    photo_max_count?: number
+  }>
 }
 
 type AssignedMachine = {
@@ -78,7 +109,9 @@ export async function GET(request: Request) {
 
     const { data: itemsData, error: itemsError } = await supabaseAdmin
       .from('checklist_template_items')
-      .select('id, template_id, question, description, question_type, required, display_order, created_at')
+      .select(
+        'id, template_id, question, description, question_type, required, display_order, created_at, fail_require_comment, fail_allow_photos, fail_require_photos, pass_allow_photos, photo_max_count'
+      )
       .eq('template_id', templateId)
       .order('display_order', { ascending: true })
 
@@ -168,7 +201,13 @@ export async function POST(request: Request) {
       return {
         question: item.question?.trim() ?? '',
         description: desc || null,
-        questionType: item.question_type ?? defaultQuestionType,
+        questionType: (item.question_type ?? item.questionType) ?? defaultQuestionType,
+        required: item.required ?? true,
+        failRequireComment: typeof item.fail_require_comment === 'boolean' ? item.fail_require_comment : (typeof item.failRequireComment === 'boolean' ? item.failRequireComment : true),
+        failAllowPhotos: typeof item.fail_allow_photos === 'boolean' ? item.fail_allow_photos : (typeof item.failAllowPhotos === 'boolean' ? item.failAllowPhotos : true),
+        failRequirePhotos: typeof item.fail_require_photos === 'boolean' ? item.fail_require_photos : (typeof item.failRequirePhotos === 'boolean' ? item.failRequirePhotos : false),
+        passAllowPhotos: typeof item.pass_allow_photos === 'boolean' ? item.pass_allow_photos : (typeof item.passAllowPhotos === 'boolean' ? item.passAllowPhotos : false),
+        photoMaxCount: typeof item.photo_max_count === 'number' ? item.photo_max_count : (typeof item.photoMaxCount === 'number' ? item.photoMaxCount : 10),
       }
     })
     .filter((item) => item.question)
@@ -217,6 +256,12 @@ export async function POST(request: Request) {
         question: item.question,
         description: item.description || null,
         question_type: item.questionType,
+        required: item.required,
+        fail_require_comment: item.failRequireComment,
+        fail_allow_photos: item.failAllowPhotos,
+        fail_require_photos: item.failRequirePhotos,
+        pass_allow_photos: item.passAllowPhotos,
+        photo_max_count: item.photoMaxCount,
       }))
     )
 
@@ -277,9 +322,14 @@ export async function PUT(request: Request) {
         id: item.id,
         question: item.question?.trim() ?? '',
         description: desc || null,
-        questionType: item.question_type ?? defaultQuestionType,
+        questionType: (item.question_type ?? item.questionType) ?? defaultQuestionType,
         required: item.required ?? true,
         displayOrder: item.display_order ?? index + 1,
+        failRequireComment: typeof item.fail_require_comment === 'boolean' ? item.fail_require_comment : (typeof item.failRequireComment === 'boolean' ? item.failRequireComment : true),
+        failAllowPhotos: typeof item.fail_allow_photos === 'boolean' ? item.fail_allow_photos : (typeof item.failAllowPhotos === 'boolean' ? item.failAllowPhotos : true),
+        failRequirePhotos: typeof item.fail_require_photos === 'boolean' ? item.fail_require_photos : (typeof item.failRequirePhotos === 'boolean' ? item.failRequirePhotos : false),
+        passAllowPhotos: typeof item.pass_allow_photos === 'boolean' ? item.pass_allow_photos : (typeof item.passAllowPhotos === 'boolean' ? item.passAllowPhotos : false),
+        photoMaxCount: typeof item.photo_max_count === 'number' ? item.photo_max_count : (typeof item.photoMaxCount === 'number' ? item.photoMaxCount : 10),
       }
     })
     .filter((item) => item.question)
@@ -345,6 +395,11 @@ export async function PUT(request: Request) {
           question_type: item.questionType,
           required: item.required,
           display_order: item.displayOrder,
+          fail_require_comment: item.failRequireComment,
+          fail_allow_photos: item.failAllowPhotos,
+          fail_require_photos: item.failRequirePhotos,
+          pass_allow_photos: item.passAllowPhotos,
+          photo_max_count: item.photoMaxCount,
         })
         .eq('id', item.id)
 
@@ -358,11 +413,16 @@ export async function PUT(request: Request) {
         .insert([
           {
             template_id: templateId,
-              question: item.question,
-              description: item.description || null,
-              question_type: item.questionType,
-              required: item.required,
-              display_order: item.displayOrder,
+            question: item.question,
+            description: item.description || null,
+            question_type: item.questionType,
+            required: item.required,
+            display_order: item.displayOrder,
+            fail_require_comment: item.failRequireComment,
+            fail_allow_photos: item.failAllowPhotos,
+            fail_require_photos: item.failRequirePhotos,
+            pass_allow_photos: item.passAllowPhotos,
+            photo_max_count: item.photoMaxCount,
           },
         ])
 

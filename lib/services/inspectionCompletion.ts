@@ -292,7 +292,7 @@ export async function completeInspectionWorkflow(params: { inspectionId: string;
 
     const { data: persistedItemsData, error: persistedItemsError } = await supabaseAdmin
       .from('inspection_items')
-      .select('id, display_order, question, description, required, answer, comments')
+      .select('id, original_template_item_id, display_order, question, description, required, answer, comments')
       .eq('inspection_id', params.inspectionId)
       .order('display_order', { ascending: true })
 
@@ -308,23 +308,97 @@ export async function completeInspectionWorkflow(params: { inspectionId: string;
       required: boolean
       answer: string | null
       comments: string | null
+        original_template_item_id?: string | null
     }>
+      // Check for missing required answers
+      const incompleteRequired = persistedItems.filter((item) => {
+        if (!item.required) return false
+        return !normalizeAnswer(item.answer)
+      })
 
-    const incompleteRequired = persistedItems.filter((item) => {
-      if (!item.required) return false
-      return !normalizeAnswer(item.answer)
-    })
+      if (incompleteRequired.length > 0) {
+        throw new InspectionCompletionError(
+          stage,
+          'Please complete all required inspection items before finishing.',
+          400,
+          {
+            incompleteItems: incompleteRequired.map((item) => ({ id: item.id, question: item.question })),
+          }
+        )
+      }
 
-    if (incompleteRequired.length > 0) {
-      throw new InspectionCompletionError(
-        stage,
-        'Please complete all required inspection items before finishing.',
-        400,
-        {
-          incompleteItems: incompleteRequired.map((item) => ({ id: item.id, question: item.question })),
+      // Fetch template-level behaviour flags for items that require comment on fail
+      const templateIds = Array.from(new Set(persistedItems.map((i) => i.original_template_item_id).filter(Boolean)))
+      let behaviourByTemplateId = new Map<string, any>()
+      if (templateIds.length > 0) {
+          const { data: templateFlagsData, error: templateFlagsError } = await supabaseAdmin
+            .from('checklist_template_items')
+            .select('id, fail_require_comment, fail_require_photos')
+            .in('id', templateIds)
+
+        if (!templateFlagsError && templateFlagsData) {
+          behaviourByTemplateId = new Map((templateFlagsData as any[]).map((t) => [t.id, t]))
         }
-      )
-    }
+      }
+
+      // Validate fail-require-comment
+      const missingCommentsForFails = persistedItems.filter((item) => {
+        const answer = normalizeAnswer(item.answer)
+        if (answer !== 'fail') return false
+        const flags = behaviourByTemplateId.get(item.original_template_item_id)
+        if (!flags?.fail_require_comment) return false
+        return !normalizeComments(item.comments)
+      })
+
+      if (missingCommentsForFails.length > 0) {
+        throw new InspectionCompletionError(
+          stage,
+          'Some failed items require comments before finishing.',
+          400,
+          {
+            incompleteItems: missingCommentsForFails.map((item) => ({ id: item.id, question: item.question })),
+          }
+        )
+      }
+
+      // Validate fail-require-photos
+      const itemsRequiringPhotos = persistedItems.filter((item) => {
+        const answer = normalizeAnswer(item.answer)
+        if (answer !== 'fail') return false
+        const flags = behaviourByTemplateId.get(item.original_template_item_id)
+        return Boolean(flags?.fail_require_photos)
+      })
+
+      if (itemsRequiringPhotos.length > 0) {
+        const itemIds = itemsRequiringPhotos.map((i) => i.id)
+        const { data: photosData, error: photosError } = await supabaseAdmin
+          .from('photo_uploads')
+          .select('id, inspection_item_id')
+          .in('inspection_item_id', itemIds)
+
+        if (photosError) {
+          throw new InspectionCompletionError(stage, photosError.message, 500)
+        }
+
+        const countByItem: Record<string, number> = {}
+        ;(photosData ?? []).forEach((p: any) => {
+          const iid = p.inspection_item_id as string
+          countByItem[iid] = (countByItem[iid] ?? 0) + 1
+        })
+
+        const missingPhotos = itemsRequiringPhotos.filter((item) => (countByItem[item.id] ?? 0) === 0)
+
+        if (missingPhotos.length > 0) {
+          throw new InspectionCompletionError(
+            stage,
+            'Some failed items require photos before finishing.',
+            400,
+            {
+              incompleteItems: missingPhotos.map((item) => ({ id: item.id, question: item.question })),
+            }
+          )
+        }
+      }
 
     stage = 'create-checklist'
     logCompletionStage(stage, { inspectionId: params.inspectionId, itemCount: persistedItems.length })

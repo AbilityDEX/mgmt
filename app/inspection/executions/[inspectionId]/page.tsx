@@ -230,6 +230,88 @@ export default function InspectionExecutionPage() {
     }
   }
 
+  const uploadPhoto = async (itemId: string, photoData: { file?: File; url?: string; caption?: string }) => {
+    if (!inspection || isReadOnly) return
+    setSavingItemId(itemId)
+    setError(null)
+
+    try {
+      const token = await getToken()
+      if (!token) {
+        setError('Authentication required.')
+        return
+      }
+
+      let file: File | null = null
+      if (photoData.file) {
+        file = photoData.file
+      } else if (photoData.url) {
+        const resp = await fetch(photoData.url)
+        const blob = await resp.blob()
+        file = new File([blob], 'photo.jpg', { type: blob.type || 'image/jpeg' })
+      }
+
+      if (!file) {
+        setError('No file provided for upload.')
+        return
+      }
+
+      // Basic client-side validation
+      const allowed = ['image/jpeg', 'image/png', 'image/webp']
+      if (!allowed.includes(file.type)) {
+        setError('Invalid image type. Use JPEG, PNG, or WebP.')
+        return
+      }
+
+      const maxBytes = 10 * 1024 * 1024
+      if (file.size > maxBytes) {
+        setError('Image too large. Maximum 10MB allowed.')
+        return
+      }
+
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('inspectionId', inspectionId)
+      formData.append('inspectionItemId', itemId)
+      if (photoData.caption) formData.append('caption', photoData.caption)
+
+      const uploadRes = await fetch('/api/inspection-photos/upload', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      })
+
+      const payload = await uploadRes.json()
+      if (!uploadRes.ok) {
+        setError(payload.error || 'Photo upload failed.')
+        return
+      }
+
+      const photo = payload.photo ?? payload
+
+      // Update local inspection state with new photo
+      setInspection((current) =>
+        current
+          ? {
+              ...current,
+              items: current.items.map((row) =>
+                row.id === itemId
+                  ? {
+                      ...row,
+                      photos: [...(row.photos ?? []), { id: photo.id, url: photo.url ?? photo.signedUrl ?? photo.storage_path ?? photo.storagePath ?? '', timestamp: photo.timestamp ?? photo.uploadedAt ?? photo.uploaded_at ?? new Date().toISOString(), caption: photo.caption ?? '' }],
+                    }
+                  : row
+              ),
+            }
+          : current
+      )
+    } catch (e) {
+      setError('Photo upload failed.')
+    } finally {
+      setSavingItemId(null)
+    }
+  }
+
   const handleComplete = async () => {
     if (!inspection || isReadOnly || completing) return
 
@@ -443,6 +525,9 @@ export default function InspectionExecutionPage() {
                       isReadOnly={false}
                       onAnswerChange={(itemId, answer, comments) => {
                         void updateItem(itemId, answer, comments)
+                      }}
+                      onPhotoUpload={(itemId, photoData) => {
+                        void uploadPhoto(itemId, photoData)
                       }}
                     />
                     {validationErrors[item.id] && (

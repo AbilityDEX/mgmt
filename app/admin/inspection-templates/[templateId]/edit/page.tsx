@@ -15,6 +15,15 @@ type DraftTemplateItem = {
   isEditing: boolean
 }
 
+// Behaviour fields will be edited in the template editor and persisted to DB
+type BehaviourFields = {
+  failRequireComment?: boolean
+  failAllowPhotos?: boolean
+  failRequirePhotos?: boolean
+  passAllowPhotos?: boolean
+  photoMaxCount?: number
+}
+
 type TemplateItem = {
   id: string
   question: string
@@ -93,6 +102,11 @@ export default function EditInspectionTemplatePage() {
         required: item.required,
         displayOrder: item.display_order,
         isEditing: false,
+        failRequireComment: (item as any).fail_require_comment ?? true,
+        failAllowPhotos: (item as any).fail_allow_photos ?? true,
+        failRequirePhotos: (item as any).fail_require_photos ?? false,
+        passAllowPhotos: (item as any).pass_allow_photos ?? false,
+        photoMaxCount: (item as any).photo_max_count ?? 10,
       }))
 
       setItems(draftItems)
@@ -125,6 +139,11 @@ export default function EditInspectionTemplatePage() {
         questionType: 'pass_fail',
         required: true,
         displayOrder: newOrder,
+        failRequireComment: true,
+        failAllowPhotos: true,
+        failRequirePhotos: false,
+        passAllowPhotos: false,
+        photoMaxCount: 10,
         isEditing: false,
       },
     ])
@@ -147,6 +166,14 @@ export default function EditInspectionTemplatePage() {
     setItems((prev) =>
       prev.map((item, i) => (i === idx ? { ...item, required } : item))
     )
+  }
+
+  const updateItemQuestionType = (idx: number, questionType: string) => {
+    setItems((prev) => prev.map((item, i) => (i === idx ? { ...item, questionType } : item)))
+  }
+
+  const updateItemBehaviour = (idx: number, changes: Partial<DraftTemplateItem & BehaviourFields>) => {
+    setItems((prev) => prev.map((item, i) => (i === idx ? { ...item, ...changes } : item)))
   }
 
   const toggleItemEdit = (idx: number, nextValue: boolean) => {
@@ -222,6 +249,11 @@ export default function EditInspectionTemplatePage() {
             question_type: item.questionType,
             required: item.required,
             display_order: item.displayOrder,
+            fail_require_comment: (item as any).failRequireComment,
+            fail_allow_photos: (item as any).failAllowPhotos,
+            fail_require_photos: (item as any).failRequirePhotos,
+            pass_allow_photos: (item as any).passAllowPhotos,
+            photo_max_count: (item as any).photoMaxCount,
           })),
         }),
       })
@@ -452,17 +484,100 @@ export default function EditInspectionTemplatePage() {
                         </label>
                       </div>
                       {item.isEditing ? (
-                        <label className="mt-3 block">
-                          <span className="text-xs text-slate-300">Description (Optional)</span>
-                          <textarea
-                            rows={2}
-                            value={item.description ?? ''}
-                            onChange={(e) => updateItemDescription(index, e.target.value)}
-                            className="mt-2 w-full rounded-2xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none resize-none"
-                            placeholder="Describe what the inspector should be checking..."
-                            disabled={saving || deleting}
-                          />
-                        </label>
+                        <>
+                          <label className="mt-3 block">
+                            <span className="text-xs text-slate-300">Description (Optional)</span>
+                            <textarea
+                              rows={2}
+                              value={item.description ?? ''}
+                              onChange={(e) => updateItemDescription(index, e.target.value)}
+                              className="mt-2 w-full rounded-2xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none resize-none"
+                              placeholder="Describe what the inspector should be checking..."
+                              disabled={saving || deleting}
+                            />
+                          </label>
+
+                          <div className="mt-3 flex items-center gap-3">
+                            <label className="text-xs text-slate-300">Question Type</label>
+                            <select
+                              value={item.questionType}
+                              onChange={(e) => updateItemQuestionType(index, e.target.value)}
+                              disabled={saving || deleting}
+                              className="rounded-2xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100"
+                            >
+                              <option value="pass_fail">Pass / Fail</option>
+                              <option value="yes_no">Yes / No</option>
+                              <option value="text">Text</option>
+                              <option value="number">Number</option>
+                              <option value="decimal">Decimal</option>
+                              <option value="long_notes">Long Notes</option>
+                              <option value="multiple_choice">Multiple Choice</option>
+                              <option value="dropdown">Dropdown</option>
+                              <option value="signature">Signature</option>
+                            </select>
+                          </div>
+
+                          <div className="mt-3 rounded-2xl border border-slate-800 bg-slate-900/50 p-3">
+                            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Inspection Behaviour</p>
+                            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                              <label className="flex items-center gap-2 text-sm">
+                                <input
+                                  type="checkbox"
+                                  checked={(item as any).failRequireComment ?? true}
+                                  onChange={(e) => updateItemBehaviour(index, { failRequireComment: e.target.checked })}
+                                  disabled={saving || deleting}
+                                  className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-emerald-600"
+                                />
+                                <span className="text-slate-300">Require comment on FAIL</span>
+                              </label>
+
+                              <label className="flex items-center gap-2 text-sm">
+                                <input
+                                  type="checkbox"
+                                  checked={(item as any).failAllowPhotos ?? true}
+                                  onChange={(e) => updateItemBehaviour(index, { failAllowPhotos: e.target.checked })}
+                                  disabled={saving || deleting}
+                                  className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-emerald-600"
+                                />
+                                <span className="text-slate-300">Allow photo uploads on FAIL</span>
+                              </label>
+
+                              <label className="flex items-center gap-2 text-sm">
+                                <input
+                                  type="checkbox"
+                                  checked={(item as any).failRequirePhotos ?? false}
+                                  onChange={(e) => updateItemBehaviour(index, { failRequirePhotos: e.target.checked })}
+                                  disabled={saving || deleting}
+                                  className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-emerald-600"
+                                />
+                                <span className="text-slate-300">Require photo on FAIL</span>
+                              </label>
+
+                              <label className="flex items-center gap-2 text-sm">
+                                <input
+                                  type="checkbox"
+                                  checked={(item as any).passAllowPhotos ?? false}
+                                  onChange={(e) => updateItemBehaviour(index, { passAllowPhotos: e.target.checked })}
+                                  disabled={saving || deleting}
+                                  className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-emerald-600"
+                                />
+                                <span className="text-slate-300">Allow photo uploads on PASS</span>
+                              </label>
+
+                              <label className="flex items-center gap-2 text-sm">
+                                <span className="text-slate-300">Photo max</span>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  value={(item as any).photoMaxCount ?? 10}
+                                  onChange={(e) => updateItemBehaviour(index, { photoMaxCount: Number(e.target.value || 10) })}
+                                  disabled={saving || deleting}
+                                  className="ml-2 w-24 rounded-2xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100"
+                                />
+                              </label>
+                            </div>
+                          </div>
+                        </>
                       ) : null}
                     </div>
                   </article>

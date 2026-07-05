@@ -85,7 +85,7 @@ export async function GET(request: Request, context: RouteContext) {
 
   const { data: itemsData, error: itemsError } = await supabaseAdmin
     .from('inspection_items')
-    .select('id, display_order, question, question_type, required, description, answer, comments, completed')
+    .select('id, original_template_item_id, display_order, question, question_type, required, description, answer, comments, completed')
     .eq('inspection_id', inspectionId)
     .order('display_order', { ascending: true })
 
@@ -107,6 +107,62 @@ export async function GET(request: Request, context: RouteContext) {
     )
   }
 
+  // Fetch behaviour flags from template items for any original template references
+  const templateIds = Array.from(
+    new Set(((itemsData ?? []) as any[]).map((r) => r.original_template_item_id).filter(Boolean))
+  )
+
+  let behaviourByTemplateId = new Map<string, any>()
+  if (templateIds.length > 0) {
+    const { data: templateFlagsData, error: templateFlagsError } = await supabaseAdmin
+      .from('checklist_template_items')
+      .select('id, fail_require_comment, fail_allow_photos, fail_require_photos, pass_allow_photos, photo_max_count')
+      .in('id', templateIds)
+
+    if (!templateFlagsError && templateFlagsData) {
+      behaviourByTemplateId = new Map((templateFlagsData as any[]).map((t) => [t.id, t]))
+    }
+  }
+
+  // Fetch photos for items
+  let photosByItemId = new Map<string, Array<{ id: string; url: string; caption?: string; uploadedAt?: string }>>()
+  if (itemIds.length > 0) {
+    const { data: photosData, error: photosError } = await supabaseAdmin
+      .from('photo_uploads')
+      .select('id, inspection_item_id, storage_path, caption, uploaded_at')
+      .in('inspection_item_id', itemIds)
+      .order('uploaded_at', { ascending: true })
+
+    if (!photosError && photosData) {
+      const bucket = 'inspection-photos'
+      // Generate signed URLs for each photo
+      const signedPromises = (photosData as any[]).map(async (p) => {
+        let path = p.storage_path || p.storagePath || ''
+        let url = path
+        try {
+          const { data: signedData } = await supabaseAdmin!.storage.from(bucket).createSignedUrl(path, 60 * 60)
+          url = signedData?.signedUrl ?? url
+        } catch {
+          // fallback to storage_path
+        }
+        return {
+          id: p.id as string,
+          inspection_item_id: p.inspection_item_id as string,
+          url,
+          caption: p.caption as string | null,
+          timestamp: (p.uploaded_at as string) ?? null,
+        }
+      })
+
+      const resolved = await Promise.all(signedPromises)
+      for (const p of resolved) {
+        const arr = photosByItemId.get(p.inspection_item_id) ?? []
+        arr.push({ id: p.id, url: p.url, caption: p.caption ?? undefined, timestamp: p.timestamp ?? undefined })
+        photosByItemId.set(p.inspection_item_id, arr)
+      }
+    }
+  }
+
   return NextResponse.json({
     inspection: {
       id: inspectionData.id as string,
@@ -119,18 +175,28 @@ export async function GET(request: Request, context: RouteContext) {
       startedBy: inspectionData.started_by as string | null,
       startedAt: inspectionData.started_at as string | null,
       completedAt: inspectionData.completed_at as string | null,
-      items: ((itemsData ?? []) as InspectionItemRow[]).map((item) => ({
-        id: item.id,
-        displayOrder: item.display_order,
-        question: item.question,
-        questionType: item.question_type,
-        required: item.required,
-        helpText: (item.description as string | null) ?? undefined,
-        answer: item.answer,
-        comments: item.comments,
-        completed: item.completed,
-        defectId: defectByItemId.get(item.id) ?? null,
-      })),
+      items: ((itemsData ?? []) as any[]).map((item) => {
+        const flags = behaviourByTemplateId.get(item.original_template_item_id)
+        return {
+          id: item.id,
+          displayOrder: item.display_order,
+          question: item.question,
+          questionType: item.question_type,
+          required: item.required,
+          helpText: (item.description as string | null) ?? undefined,
+          answer: item.answer,
+          comments: item.comments,
+          completed: item.completed,
+          defectId: defectByItemId.get(item.id) ?? null,
+          // Behaviour flags mapped to camelCase for client
+          failRequireComment: flags?.fail_require_comment ?? true,
+          failAllowPhotos: flags?.fail_allow_photos ?? true,
+          failRequirePhotos: flags?.fail_require_photos ?? false,
+          passAllowPhotos: flags?.pass_allow_photos ?? false,
+          photoMaxCount: flags?.photo_max_count ?? 10,
+          photos: photosByItemId.get(item.id) ?? [],
+        }
+      }),
     },
   })
 }
@@ -198,7 +264,7 @@ export async function PATCH(request: Request, context: RouteContext) {
 
     const { data: existingItem, error: existingItemError } = await supabaseAdmin
       .from('inspection_items')
-      .select('id, question')
+      .select('id, question, original_template_item_id')
       .eq('id', itemId)
       .eq('inspection_id', inspectionId)
       .maybeSingle()
@@ -209,6 +275,41 @@ export async function PATCH(request: Request, context: RouteContext) {
 
     if (!existingItem) {
       return NextResponse.json({ error: 'Inspection item not found.' }, { status: 404 })
+    }
+
+    // Enforce required comment or photos on FAIL based on the original template item behaviour
+    if ((answer as string | null) === 'fail' && existingItem.original_template_item_id) {
+      const { data: templateItem } = await supabaseAdmin
+        .from('checklist_template_items')
+        .select('id, fail_require_comment, fail_require_photos')
+        .eq('id', existingItem.original_template_item_id)
+        .maybeSingle()
+
+      if (templateItem?.fail_require_comment && !comments) {
+        return NextResponse.json(
+          { error: 'Comment is required for failed items.', fieldErrors: { comments: 'Comment required for failed item.' } },
+          { status: 400 }
+        )
+      }
+
+      if (templateItem?.fail_require_photos) {
+        const { data: photosForItem, error: photosError } = await supabaseAdmin
+          .from('photo_uploads')
+          .select('id')
+          .eq('inspection_item_id', itemId)
+          .limit(1)
+
+        if (photosError) {
+          return NextResponse.json({ error: photosError.message }, { status: 500 })
+        }
+
+        if (!photosForItem || (photosForItem as any[]).length === 0) {
+          return NextResponse.json(
+            { error: 'At least one photo is required for failed items.', fieldErrors: { photos: 'Photo required for failed item.' } },
+            { status: 400 }
+          )
+        }
+      }
     }
 
     const { data: updatedItem, error: updateError } = await supabaseAdmin

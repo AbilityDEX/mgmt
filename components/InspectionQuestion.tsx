@@ -7,7 +7,7 @@ type InspectionQuestionProps = {
   item: InspectionItem
   isReadOnly?: boolean
   onAnswerChange?: (itemId: string, answer: string | null, comments?: string | null) => void
-  onPhotoUpload?: (itemId: string, photoData: { url: string; caption?: string }) => void
+  onPhotoUpload?: (itemId: string, photoData: { file?: File; url?: string; caption?: string }) => void
   onSignatureCapture?: (itemId: string, signatureData: string) => void
 }
 
@@ -44,6 +44,12 @@ export default function InspectionQuestion({
   const handleCommentsChange = (comments: string) => {
     setLocalComments(comments || null)
     onAnswerChange?.(item.id, localAnswer, comments || undefined)
+  }
+
+  const handleFileSelect = (file?: File | null) => {
+    if (!file) return
+    onPhotoUpload?.(item.id, { file })
+    // Do not change the item's answer when attaching supporting evidence
   }
 
   const renderQuestion = () => {
@@ -106,6 +112,41 @@ export default function InspectionQuestion({
                     className={`${inputClass} mt-2 resize-none`}
                   />
                 </label>
+              </div>
+            )}
+            {/* Supporting photos for pass/fail (based on template behaviour flags) */}
+            {!isReadOnly && (
+              <div className="mt-3">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null
+                    handleFileSelect(f)
+                    // reset input so same file can be selected again
+                    if (e.target) e.target.value = ''
+                  }}
+                />
+                {( (localAnswer === 'fail' && (item.failAllowPhotos || item.failRequirePhotos)) || (localAnswer === 'pass' && item.passAllowPhotos) ) && (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={(item.photos ?? []).length >= (item.photoMaxCount ?? 10)}
+                      className={`mt-2 rounded-2xl px-4 py-2 text-sm font-semibold ${
+                        (item.photos ?? []).length >= (item.photoMaxCount ?? 10)
+                          ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                          : 'bg-emerald-600/15 text-emerald-300 hover:bg-emerald-600/25'
+                      }`}
+                    >
+                      Add Photo
+                    </button>
+                    <p className="mt-2 text-xs text-slate-400">{(item.photos ?? []).length} / {(item.photoMaxCount ?? 10)} photos</p>
+                  </div>
+                )}
               </div>
             )}
           </div>

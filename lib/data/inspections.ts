@@ -31,7 +31,7 @@ export type ChoiceOption = {
 export type PhotoData = {
   id: string
   url: string
-  timestamp: string
+  uploadedAt: string
   caption?: string
 }
 

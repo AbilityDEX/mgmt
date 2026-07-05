@@ -345,7 +345,7 @@ export async function completeInspectionWorkflow(params: { inspectionId: string;
       const missingCommentsForFails = persistedItems.filter((item) => {
         const answer = normalizeAnswer(item.answer)
         if (answer !== 'fail') return false
-        const flags = behaviourByTemplateId.get(item.original_template_item_id)
+        const flags = behaviourByTemplateId.get(item.original_template_item_id as string)
         if (!flags?.fail_require_comment) return false
         return !normalizeComments(item.comments)
       })
@@ -365,7 +365,7 @@ export async function completeInspectionWorkflow(params: { inspectionId: string;
       const itemsRequiringPhotos = persistedItems.filter((item) => {
         const answer = normalizeAnswer(item.answer)
         if (answer !== 'fail') return false
-        const flags = behaviourByTemplateId.get(item.original_template_item_id)
+        const flags = behaviourByTemplateId.get(item.original_template_item_id as string)
         return Boolean(flags?.fail_require_photos)
       })
 

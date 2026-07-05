@@ -125,7 +125,7 @@ export async function GET(request: Request, context: RouteContext) {
   }
 
   // Fetch photos for items
-  let photosByItemId = new Map<string, Array<{ id: string; url: string; caption?: string; uploadedAt?: string }>>()
+  const photosByItemId = new Map<string, Array<{ id: string; url: string; caption?: string; uploadedAt?: string }>>()
   if (itemIds.length > 0) {
     const { data: photosData, error: photosError } = await supabaseAdmin
       .from('photo_uploads')
@@ -137,7 +137,7 @@ export async function GET(request: Request, context: RouteContext) {
       const bucket = 'inspection-photos'
       // Generate signed URLs for each photo
       const signedPromises = (photosData as any[]).map(async (p) => {
-        let path = p.storage_path || p.storagePath || ''
+        const path = p.storage_path || p.storagePath || ''
         let url = path
         try {
           const { data: signedData } = await supabaseAdmin!.storage.from(bucket).createSignedUrl(path, 60 * 60)
@@ -150,14 +150,14 @@ export async function GET(request: Request, context: RouteContext) {
           inspection_item_id: p.inspection_item_id as string,
           url,
           caption: p.caption as string | null,
-          timestamp: (p.uploaded_at as string) ?? null,
+          uploadedAt: (p.uploaded_at as string) ?? null,
         }
       })
 
       const resolved = await Promise.all(signedPromises)
       for (const p of resolved) {
         const arr = photosByItemId.get(p.inspection_item_id) ?? []
-        arr.push({ id: p.id, url: p.url, caption: p.caption ?? undefined, timestamp: p.timestamp ?? undefined })
+        arr.push({ id: p.id, url: p.url, caption: p.caption ?? undefined, uploadedAt: p.uploadedAt ?? undefined })
         photosByItemId.set(p.inspection_item_id, arr)
       }
     }

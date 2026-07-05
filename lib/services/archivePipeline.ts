@@ -33,7 +33,7 @@ type InspectionItemForArchive = {
   questionType: string
   answer: string | null
   comments: string | null
-  photos: Array<{ id: string; url: string; timestamp: string; caption: string | null }>
+  photos: Array<{ id: string; url: string; uploadedAt: string; caption: string | null }>
   signatureData: string | null
 }
 
@@ -140,7 +140,7 @@ async function loadInspectionArchiveData(inspectionId: string) {
   if (itemsError) throw itemsError
 
   const itemIds = (itemsData ?? []).map((row) => row.id as string)
-  const photoByItemId = new Map<string, Array<{ id: string; url: string; timestamp: string; caption: string | null }>>()
+  const photoByItemId = new Map<string, Array<{ id: string; url: string; uploadedAt: string; caption: string | null }>>()
 
   if (itemIds.length > 0) {
     const { data: photosData, error: photosError } = await supabaseAdmin
@@ -166,7 +166,7 @@ async function loadInspectionArchiveData(inspectionId: string) {
         existing.push({
           id: photo.id as string,
           url: photo.storage_path as string,
-          timestamp: (photo.uploaded_at as string | null) ?? new Date().toISOString(),
+          uploadedAt: (photo.uploaded_at as string | null) ?? new Date().toISOString(),
           caption: (photo.caption as string | null) ?? null,
         })
         photoByItemId.set(itemId, existing)

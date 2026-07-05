@@ -201,13 +201,13 @@ export async function POST(request: Request) {
       return {
         question: item.question?.trim() ?? '',
         description: desc || null,
-        questionType: (item.question_type ?? item.questionType) ?? defaultQuestionType,
+        questionType: (item.question_type ?? (item as any).questionType) ?? defaultQuestionType,
         required: item.required ?? true,
-        failRequireComment: typeof item.fail_require_comment === 'boolean' ? item.fail_require_comment : (typeof item.failRequireComment === 'boolean' ? item.failRequireComment : true),
-        failAllowPhotos: typeof item.fail_allow_photos === 'boolean' ? item.fail_allow_photos : (typeof item.failAllowPhotos === 'boolean' ? item.failAllowPhotos : true),
-        failRequirePhotos: typeof item.fail_require_photos === 'boolean' ? item.fail_require_photos : (typeof item.failRequirePhotos === 'boolean' ? item.failRequirePhotos : false),
-        passAllowPhotos: typeof item.pass_allow_photos === 'boolean' ? item.pass_allow_photos : (typeof item.passAllowPhotos === 'boolean' ? item.passAllowPhotos : false),
-        photoMaxCount: typeof item.photo_max_count === 'number' ? item.photo_max_count : (typeof item.photoMaxCount === 'number' ? item.photoMaxCount : 10),
+        failRequireComment: typeof item.fail_require_comment === 'boolean' ? item.fail_require_comment : (typeof (item as any).failRequireComment === 'boolean' ? (item as any).failRequireComment : true),
+        failAllowPhotos: typeof item.fail_allow_photos === 'boolean' ? item.fail_allow_photos : (typeof (item as any).failAllowPhotos === 'boolean' ? (item as any).failAllowPhotos : true),
+        failRequirePhotos: typeof item.fail_require_photos === 'boolean' ? item.fail_require_photos : (typeof (item as any).failRequirePhotos === 'boolean' ? (item as any).failRequirePhotos : false),
+        passAllowPhotos: typeof item.pass_allow_photos === 'boolean' ? item.pass_allow_photos : (typeof (item as any).passAllowPhotos === 'boolean' ? (item as any).passAllowPhotos : false),
+        photoMaxCount: typeof item.photo_max_count === 'number' ? item.photo_max_count : (typeof (item as any).photoMaxCount === 'number' ? (item as any).photoMaxCount : 10),
       }
     })
     .filter((item) => item.question)
@@ -257,11 +257,11 @@ export async function POST(request: Request) {
         description: item.description || null,
         question_type: item.questionType,
         required: item.required,
-        fail_require_comment: item.failRequireComment,
-        fail_allow_photos: item.failAllowPhotos,
-        fail_require_photos: item.failRequirePhotos,
-        pass_allow_photos: item.passAllowPhotos,
-        photo_max_count: item.photoMaxCount,
+        fail_require_comment: (item as any).failRequireComment,
+        fail_allow_photos: (item as any).failAllowPhotos,
+        fail_require_photos: (item as any).failRequirePhotos,
+        pass_allow_photos: (item as any).passAllowPhotos,
+        photo_max_count: (item as any).photoMaxCount,
       }))
     )
 
@@ -322,14 +322,14 @@ export async function PUT(request: Request) {
         id: item.id,
         question: item.question?.trim() ?? '',
         description: desc || null,
-        questionType: (item.question_type ?? item.questionType) ?? defaultQuestionType,
+        questionType: (item.question_type ?? (item as any).questionType) ?? defaultQuestionType,
         required: item.required ?? true,
         displayOrder: item.display_order ?? index + 1,
-        failRequireComment: typeof item.fail_require_comment === 'boolean' ? item.fail_require_comment : (typeof item.failRequireComment === 'boolean' ? item.failRequireComment : true),
-        failAllowPhotos: typeof item.fail_allow_photos === 'boolean' ? item.fail_allow_photos : (typeof item.failAllowPhotos === 'boolean' ? item.failAllowPhotos : true),
-        failRequirePhotos: typeof item.fail_require_photos === 'boolean' ? item.fail_require_photos : (typeof item.failRequirePhotos === 'boolean' ? item.failRequirePhotos : false),
-        passAllowPhotos: typeof item.pass_allow_photos === 'boolean' ? item.pass_allow_photos : (typeof item.passAllowPhotos === 'boolean' ? item.passAllowPhotos : false),
-        photoMaxCount: typeof item.photo_max_count === 'number' ? item.photo_max_count : (typeof item.photoMaxCount === 'number' ? item.photoMaxCount : 10),
+        failRequireComment: typeof item.fail_require_comment === 'boolean' ? item.fail_require_comment : (typeof (item as any).failRequireComment === 'boolean' ? (item as any).failRequireComment : true),
+        failAllowPhotos: typeof item.fail_allow_photos === 'boolean' ? item.fail_allow_photos : (typeof (item as any).failAllowPhotos === 'boolean' ? (item as any).failAllowPhotos : true),
+        failRequirePhotos: typeof item.fail_require_photos === 'boolean' ? item.fail_require_photos : (typeof (item as any).failRequirePhotos === 'boolean' ? (item as any).failRequirePhotos : false),
+        passAllowPhotos: typeof item.pass_allow_photos === 'boolean' ? item.pass_allow_photos : (typeof (item as any).passAllowPhotos === 'boolean' ? (item as any).passAllowPhotos : false),
+        photoMaxCount: typeof item.photo_max_count === 'number' ? item.photo_max_count : (typeof (item as any).photoMaxCount === 'number' ? (item as any).photoMaxCount : 10),
       }
     })
     .filter((item) => item.question)
@@ -395,11 +395,11 @@ export async function PUT(request: Request) {
           question_type: item.questionType,
           required: item.required,
           display_order: item.displayOrder,
-          fail_require_comment: item.failRequireComment,
-          fail_allow_photos: item.failAllowPhotos,
-          fail_require_photos: item.failRequirePhotos,
-          pass_allow_photos: item.passAllowPhotos,
-          photo_max_count: item.photoMaxCount,
+          fail_require_comment: (item as any).failRequireComment,
+          fail_allow_photos: (item as any).failAllowPhotos,
+          fail_require_photos: (item as any).failRequirePhotos,
+          pass_allow_photos: (item as any).passAllowPhotos,
+          photo_max_count: (item as any).photoMaxCount,
         })
         .eq('id', item.id)
 

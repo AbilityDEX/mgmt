@@ -298,7 +298,7 @@ export default function InspectionExecutionPage() {
                 row.id === itemId
                   ? {
                       ...row,
-                      photos: [...(row.photos ?? []), { id: photo.id, url: photo.url ?? photo.signedUrl ?? photo.storage_path ?? photo.storagePath ?? '', timestamp: photo.timestamp ?? photo.uploadedAt ?? photo.uploaded_at ?? new Date().toISOString(), caption: photo.caption ?? '' }],
+                      photos: [...(row.photos ?? []), { id: photo.id, url: photo.url ?? photo.signedUrl ?? photo.storage_path ?? photo.storagePath ?? '', uploadedAt: photo.uploadedAt ?? photo.uploaded_at ?? new Date().toISOString(), caption: photo.caption ?? '' }],
                     }
                   : row
               ),

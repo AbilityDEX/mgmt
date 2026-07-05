@@ -230,96 +230,6 @@ export default function InspectionExecutionPage() {
     }
   }
 
-  const compressImageFile = async (file: File, maxWidth = 1600, quality = 0.8): Promise<Blob> => {
-    try {
-      const img = await createImageBitmap(file)
-      const ratio = Math.min(1, maxWidth / img.width)
-      const width = Math.round(img.width * ratio)
-      const height = Math.round(img.height * ratio)
-
-      const canvas = document.createElement('canvas')
-      canvas.width = width
-      canvas.height = height
-      const ctx = canvas.getContext('2d')
-      if (!ctx) throw new Error('Canvas not supported')
-      ctx.drawImage(img, 0, 0, width, height)
-      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality))
-      if (!blob) throw new Error('Compression failed')
-      return blob
-    } catch (e) {
-      return file
-    }
-  }
-
-  const handlePhotoUpload = async (itemId: string, file: File) => {
-    if (!inspection) return
-    setError(null)
-    // compress
-    const blob = await compressImageFile(file)
-
-    const filename = `${Date.now()}-${crypto.randomUUID()}.jpg`
-    const machineId = inspection.machineId
-    const path = `inspection-photos/${machineId}/${inspection.id}/${itemId}/${filename}`
-
-    try {
-      // upload via client-side supabase (user auth applies)
-      const { data: uploadData, error: uploadError } = await supabaseClient.storage
-        .from('inspection-photos')
-        .upload(path, blob, { contentType: blob.type })
-
-      if (uploadError) throw uploadError
-
-      // register metadata server-side
-      const token = await getToken()
-      if (!token) throw new Error('Authentication required')
-
-      const metaResp = await fetch('/api/inspection-photos', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          inspection_id: inspection.id,
-          inspection_item_id: itemId,
-          machine_id: machineId,
-          storage_path: path,
-          original_filename: file.name,
-          file_size: blob.size,
-          mime_type: blob.type,
-        }),
-      })
-
-      const payload = await metaResp.json()
-      if (!metaResp.ok) throw new Error(payload.error || 'Failed to register photo')
-
-        const photo = payload.photo
-
-        await fetchPhotosForItem(itemId, token)
-    } catch (e: any) {
-      setError(e?.message || 'Photo upload failed')
-    }
-  }
-
-    const fetchPhotosForItem = async (itemId: string, token?: string | null) => {
-      try {
-        const t = token ?? (await getToken())
-        if (!t) return
-        const listResp = await fetch(`/api/inspection-photos?inspection_item_id=${encodeURIComponent(itemId)}`, {
-          headers: { Authorization: `Bearer ${t}` },
-        })
-        const listPayload = await listResp.json()
-        const photos = listPayload.photos ?? []
-
-        setInspection((current) => {
-          if (!current) return current
-          return {
-            ...current,
-            items: current.items.map((it) => (it.id === itemId ? { ...it, photos } : it)),
-          }
-        })
-      } catch {
-        // ignore
-      }
-    }
-
   const handleComplete = async () => {
     if (!inspection || isReadOnly || completing) return
 
@@ -533,12 +443,6 @@ export default function InspectionExecutionPage() {
                       isReadOnly={false}
                       onAnswerChange={(itemId, answer, comments) => {
                         void updateItem(itemId, answer, comments)
-                      }}
-                      onPhotoUpload={(itemId, file) => {
-                        void handlePhotoUpload(itemId, file)
-                      }}
-                      onPhotosChanged={(itemId) => {
-                        void fetchPhotosForItem(itemId)
                       }}
                     />
                     {validationErrors[item.id] && (

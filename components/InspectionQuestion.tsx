@@ -1,16 +1,14 @@
 'use client'
 
 import { useState, useRef } from 'react'
-import { supabaseClient } from '@/lib/supabase'
 import type { InspectionItem, QuestionType, ChoiceOption } from '@/lib/data/inspections'
 
 type InspectionQuestionProps = {
   item: InspectionItem
   isReadOnly?: boolean
   onAnswerChange?: (itemId: string, answer: string | null, comments?: string | null) => void
-  onPhotoUpload?: (itemId: string, file: File) => void
+  onPhotoUpload?: (itemId: string, photoData: { url: string; caption?: string }) => void
   onSignatureCapture?: (itemId: string, signatureData: string) => void
-  onPhotosChanged?: (itemId: string) => void
 }
 
 export default function InspectionQuestion({
@@ -19,7 +17,6 @@ export default function InspectionQuestion({
   onAnswerChange,
   onPhotoUpload,
   onSignatureCapture,
-  onPhotosChanged,
 }: InspectionQuestionProps) {
   const [localAnswer, setLocalAnswer] = useState<string | null>(item.answer)
   const [localComments, setLocalComments] = useState<string | null>(item.comments)
@@ -27,8 +24,6 @@ export default function InspectionQuestion({
   const [isCapturingSignature, setIsCapturingSignature] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const [viewerOpen, setViewerOpen] = useState(false)
-  const [viewerIndex, setViewerIndex] = useState(0)
 
   const inputClass =
     'mt-2 w-full rounded-3xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-100 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/20'
@@ -285,42 +280,15 @@ export default function InspectionQuestion({
                   <p className="text-sm font-semibold text-emerald-400">
                     {(item.photos ?? []).length} photo(s) uploaded
                   </p>
-                  <div className="flex items-center justify-center gap-3">
-                    {!isReadOnly && (
-                      <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        className="rounded-2xl bg-emerald-600/15 px-4 py-2 text-sm font-semibold text-emerald-300 hover:bg-emerald-600/25"
-                      >
-                        Add Photo
-                      </button>
-                    )}
+                  {!isReadOnly && (
                     <button
                       type="button"
-                      onClick={() => {
-                        setViewerIndex(0)
-                        setViewerOpen(true)
-                      }}
-                      className="rounded-2xl bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-slate-700"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="rounded-2xl bg-emerald-600/15 px-4 py-2 text-sm font-semibold text-emerald-300 hover:bg-emerald-600/25"
                     >
-                      View Photos
+                      Add Photo
                     </button>
-                  </div>
-                  <div className="mt-3 grid grid-cols-3 gap-2">
-                    {(item.photos ?? []).map((p, idx) => (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => {
-                          setViewerIndex(idx)
-                          setViewerOpen(true)
-                        }}
-                        className="h-20 w-full overflow-hidden rounded-lg bg-slate-800"
-                      >
-                        <img src={p.url} alt={p.caption ?? 'Photo'} className="h-full w-full object-cover" />
-                      </button>
-                    ))}
-                  </div>
+                  )}
                 </div>
               ) : (
                 <button
@@ -339,70 +307,17 @@ export default function InspectionQuestion({
                 capture="environment"
                 className="hidden"
                 onChange={(e) => {
-                  const file = e.target.files?.[0]
-                  if (file) {
-                    onPhotoUpload?.(item.id, file)
-                    handleAnswerChange('captured')
+                  if (e.target.files?.[0]) {
+                    const reader = new FileReader()
+                    reader.onload = (event) => {
+                      const url = event.target?.result as string
+                      onPhotoUpload?.(item.id, { url })
+                      handleAnswerChange('captured')
+                    }
+                    reader.readAsDataURL(e.target.files[0])
                   }
                 }}
               />
-              {/* Viewer modal */}
-              {viewerOpen && (item.photos ?? [])[viewerIndex] && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-                  <div className="relative max-h-full max-w-full">
-                    <button
-                      type="button"
-                      onClick={() => setViewerOpen(false)}
-                      className="absolute right-2 top-2 rounded-full bg-slate-900/70 px-3 py-2 text-sm"
-                    >
-                      Close
-                    </button>
-                    <div className="flex items-center gap-3">
-                      <button
-                        type="button"
-                        onClick={() => setViewerIndex((i) => Math.max(0, i - 1))}
-                        className="rounded-lg bg-slate-800 px-3 py-2 text-white"
-                      >
-                        ◀
-                      </button>
-                      <img src={(item.photos ?? [])[viewerIndex].url} alt={(item.photos ?? [])[viewerIndex].caption ?? 'Photo'} className="max-h-[80vh] max-w-[80vw] object-contain" />
-                      <button
-                        type="button"
-                        onClick={() => setViewerIndex((i) => Math.min((item.photos ?? []).length - 1, i + 1))}
-                        className="rounded-lg bg-slate-800 px-3 py-2 text-white"
-                      >
-                        ▶
-                      </button>
-                    </div>
-                    <div className="mt-3 flex items-center justify-between">
-                      <a href={(item.photos ?? [])[viewerIndex].url} target="_blank" rel="noreferrer" className="text-sm text-slate-200 underline">Download</a>
-                      {!isReadOnly && (
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            try {
-                              const { data } = await supabaseClient.auth.getSession()
-                              const token = data.session?.access_token
-                              if (!token) throw new Error('Authentication required')
-                              const pid = (item.photos ?? [])[viewerIndex].id
-                              const resp = await fetch(`/api/inspection-photos/${pid}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } })
-                              const payload = await resp.json()
-                              if (!resp.ok) throw new Error(payload.error || 'Failed to delete')
-                              onPhotosChanged?.(item.id)
-                              setViewerOpen(false)
-                            } catch (e) {
-                              // ignore for now
-                            }
-                          }}
-                          className="rounded-2xl bg-rose-600 px-3 py-2 text-sm font-semibold text-white"
-                        >
-                          Delete
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
         )

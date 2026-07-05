@@ -9,6 +9,14 @@ type InspectionQuestionProps = {
   onAnswerChange?: (itemId: string, answer: string | null, comments?: string | null) => void
   onPhotoUpload?: (itemId: string, photoData: { file?: File; url?: string; caption?: string }) => void
   onPhotoDelete?: (itemId: string, photoId: string) => void
+  localUploads?: Array<{
+    tempId: string
+    previewUrl: string
+    status: 'compressing' | 'uploading' | 'uploaded' | 'failed'
+    serverId?: string
+  }>
+  onRetryLocalUpload?: (itemId: string, tempId: string) => void
+  onRemoveLocalUpload?: (itemId: string, tempId: string) => void
   onSignatureCapture?: (itemId: string, signatureData: string) => void
 }
 
@@ -18,6 +26,9 @@ export default function InspectionQuestion({
   onAnswerChange,
   onPhotoUpload,
   onPhotoDelete,
+  localUploads = [],
+  onRetryLocalUpload,
+  onRemoveLocalUpload,
   onSignatureCapture,
 }: InspectionQuestionProps) {
   const [localAnswer, setLocalAnswer] = useState<string | null>(item.answer)
@@ -321,7 +332,14 @@ export default function InspectionQuestion({
             {item.photoRequired && <p className="text-xs text-amber-400">Photo required</p>}
             <div className="rounded-3xl border-2 border-dashed border-slate-700 bg-slate-950/50 p-4">
               <div className="flex items-center justify-between px-3">
-                <p className="text-sm font-semibold text-emerald-400">{(item.photos ?? []).length} photo(s)</p>
+                <div className="flex items-center gap-4">
+                  <div className="text-sm font-semibold text-emerald-400">Photos</div>
+                  <div className="text-xs text-slate-400">
+                    ✓ Uploaded: {(item.photos ?? []).length}
+                  </div>
+                  <div className="text-xs text-slate-400">⟳ Uploading: {(localUploads ?? []).filter((l) => l.status === 'uploading' || l.status === 'compressing').length}</div>
+                  <div className="text-xs text-slate-400">⚠ Failed: {(localUploads ?? []).filter((l) => l.status === 'failed').length}</div>
+                </div>
                 {!isReadOnly && (
                   <button
                     type="button"
@@ -333,7 +351,8 @@ export default function InspectionQuestion({
                 )}
               </div>
               <div className="mt-3 px-3">
-                <div className="flex gap-2 overflow-x-auto pb-3">
+                <div className="flex gap-2 overflow-x-auto pb-3 items-center">
+                  {/* Render server photos */}
                   {(item.photos ?? []).map((p) => (
                     <div key={p.id} className="relative flex-shrink-0">
                       <img
@@ -345,6 +364,35 @@ export default function InspectionQuestion({
                           setViewerOpen(true)
                         }}
                       />
+                    </div>
+                  ))}
+
+                  {/* Render local uploads */}
+                  {(localUploads ?? []).map((l) => (
+                    <div key={l.tempId} className="relative flex-shrink-0">
+                      <img
+                        src={l.previewUrl}
+                        alt={`preview-${l.tempId}`}
+                        className="h-20 w-20 rounded-md object-cover"
+                      />
+                      <div
+                        className={`absolute left-1 top-1 rounded-md px-2 py-1 text-xs text-white ${
+                          l.status === 'uploaded'
+                            ? 'bg-emerald-600 scale-105 opacity-100'
+                            : l.status === 'failed'
+                            ? 'bg-rose-600 opacity-95'
+                            : 'bg-black/60 opacity-90'
+                        } transition-transform duration-300 ease-out`}
+                        aria-live="polite"
+                      >
+                        {l.status === 'compressing' ? '⟳ Compressing' : l.status === 'uploading' ? '↑ Uploading' : l.status === 'uploaded' ? '✓' : '⚠'}
+                      </div>
+                      <div className="absolute right-1 bottom-1 flex gap-1">
+                        {l.status === 'failed' ? (
+                          <button onClick={() => onRetryLocalUpload?.(item.id, l.tempId)} className="rounded-full bg-amber-600/80 p-1 text-xs">Retry</button>
+                        ) : null}
+                        <button onClick={() => onRemoveLocalUpload?.(item.id, l.tempId)} className="rounded-full bg-rose-600/80 p-1 text-xs">Delete</button>
+                      </div>
                     </div>
                   ))}
                 </div>

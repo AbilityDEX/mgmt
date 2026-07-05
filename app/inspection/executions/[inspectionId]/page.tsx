@@ -21,6 +21,19 @@ export default function InspectionExecutionPage() {
   const [inspection, setInspection] = useState<Inspection | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [savingItemId, setSavingItemId] = useState<string | null>(null)
+  type LocalUploadStatus = 'compressing' | 'uploading' | 'uploaded' | 'failed'
+  type LocalUpload = {
+    tempId: string
+    file?: File
+    previewUrl: string
+    status: LocalUploadStatus
+    serverId?: string
+    url?: string
+    caption?: string
+  }
+
+  const [localUploads, setLocalUploads] = useState<Record<string, LocalUpload[]>>({})
+  const [toastMessage, setToastMessage] = useState<string | null>(null)
   const [completing, setCompleting] = useState(false)
   const [autoSaving, setAutoSaving] = useState(false)
   const [lastAutoSaveTime, setLastAutoSaveTime] = useState<string | null>(null)
@@ -231,46 +244,62 @@ export default function InspectionExecutionPage() {
   }
 
   const uploadPhoto = async (itemId: string, photoData: { file?: File; url?: string; caption?: string }) => {
+    // New, non-blocking upload flow: add local preview and upload in background
     if (!inspection || isReadOnly) return
-    setSavingItemId(itemId)
     setError(null)
 
+    let file: File | null = null
+    if (photoData.file) file = photoData.file
+    else if (photoData.url) {
+      const resp = await fetch(photoData.url)
+      const blob = await resp.blob()
+      file = new File([blob], 'photo.jpg', { type: blob.type || 'image/jpeg' })
+    }
+
+    if (!file) {
+      setError('No file provided for upload.')
+      return
+    }
+
+    // Create local preview and local upload record
+    const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    const previewUrl = URL.createObjectURL(file)
+    const newLocal: LocalUpload = { tempId, file, previewUrl, status: 'compressing', caption: photoData.caption }
+
+    setLocalUploads((prev) => ({ ...(prev ?? {}), [itemId]: [...(prev[itemId] ?? []), newLocal] }))
+
+    // Background flow: compress -> upload -> finalize
+    const doCompress = async (input: File) => {
+      try {
+        const img = await createImageBitmap(input)
+        const maxW = 1600
+        const scale = Math.min(1, maxW / img.width)
+        const canvas = document.createElement('canvas')
+        canvas.width = Math.round(img.width * scale)
+        canvas.height = Math.round(img.height * scale)
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return input
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+        const blob = await new Promise<Blob | null>((res) => canvas.toBlob((b) => res(b), 'image/jpeg', 0.8))
+        if (blob) return new File([blob], input.name, { type: 'image/jpeg' })
+        return input
+      } catch {
+        return input
+      }
+    }
+
+    // Update status to uploading after compress
+    setLocalUploads((prev) => ({ ...(prev ?? {}), [itemId]: (prev[itemId] ?? []).map((u) => (u.tempId === tempId ? { ...u, status: 'uploading' } : u)) }))
+
+    const compressed = await doCompress(file)
+
+    // perform upload
     try {
       const token = await getToken()
-      if (!token) {
-        setError('Authentication required.')
-        return
-      }
-
-      let file: File | null = null
-      if (photoData.file) {
-        file = photoData.file
-      } else if (photoData.url) {
-        const resp = await fetch(photoData.url)
-        const blob = await resp.blob()
-        file = new File([blob], 'photo.jpg', { type: blob.type || 'image/jpeg' })
-      }
-
-      if (!file) {
-        setError('No file provided for upload.')
-        return
-      }
-
-      // Basic client-side validation
-      const allowed = ['image/jpeg', 'image/png', 'image/webp']
-      if (!allowed.includes(file.type)) {
-        setError('Invalid image type. Use JPEG, PNG, or WebP.')
-        return
-      }
-
-      const maxBytes = 10 * 1024 * 1024
-      if (file.size > maxBytes) {
-        setError('Image too large. Maximum 10MB allowed.')
-        return
-      }
+      if (!token) throw new Error('Authentication required.')
 
       const formData = new FormData()
-      formData.append('file', file)
+      formData.append('file', compressed)
       formData.append('inspectionId', inspectionId)
       formData.append('inspectionItemId', itemId)
       if (photoData.caption) formData.append('caption', photoData.caption)
@@ -283,13 +312,15 @@ export default function InspectionExecutionPage() {
 
       const payload = await uploadRes.json()
       if (!uploadRes.ok) {
-        setError(payload.error || 'Photo upload failed.')
-        return
+        throw new Error(payload.error || 'Upload failed')
       }
 
       const photo = payload.photo ?? payload
 
-      // Update local inspection state with new photo
+      // Mark local upload as uploaded and attach server info
+      setLocalUploads((prev) => ({ ...(prev ?? {}), [itemId]: (prev[itemId] ?? []).map((u) => (u.tempId === tempId ? { ...u, status: 'uploaded', serverId: photo.id, url: photo.url ?? photo.signedUrl ?? photo.storage_path ?? '' } : u)) }))
+
+      // Add server photo to inspection state without reloading
       setInspection((current) =>
         current
           ? {
@@ -298,17 +329,22 @@ export default function InspectionExecutionPage() {
                 row.id === itemId
                   ? {
                       ...row,
-                      photos: [...(row.photos ?? []), { id: photo.id, url: photo.url ?? photo.signedUrl ?? photo.storage_path ?? photo.storagePath ?? '', uploadedAt: photo.uploadedAt ?? photo.uploaded_at ?? new Date().toISOString(), caption: photo.caption ?? '' }],
+                      photos: [...(row.photos ?? []), { id: photo.id, url: photo.url ?? photo.signedUrl ?? photo.storage_path ?? '', uploadedAt: photo.uploadedAt ?? photo.uploaded_at ?? new Date().toISOString(), caption: photo.caption ?? '' }],
                     }
                   : row
               ),
             }
           : current
       )
-    } catch (e) {
-      setError('Photo upload failed.')
-    } finally {
-      setSavingItemId(null)
+
+      // Show toast
+      setToastMessage('Photo uploaded successfully.')
+      setTimeout(() => setToastMessage(null), 3000)
+    } catch (err: any) {
+      // mark failed
+      setLocalUploads((prev) => ({ ...(prev ?? {}), [itemId]: (prev[itemId] ?? []).map((u) => (u.tempId === tempId ? { ...u, status: 'failed' } : u)) }))
+      setToastMessage('Upload failed. Tap Retry.')
+      setTimeout(() => setToastMessage(null), 3000)
     }
   }
 
@@ -333,11 +369,35 @@ export default function InspectionExecutionPage() {
         return
       }
 
-      // Reload inspection to regenerate signed URLs
-      await load()
+      // Remove photo from local inspection state
+      setInspection((current) =>
+        current
+          ? {
+              ...current,
+              items: current.items.map((row) =>
+                row.id === itemId
+                  ? { ...row, photos: (row.photos ?? []).filter((p) => p.id !== photoId) }
+                  : row
+              ),
+            }
+          : current
+      )
     } catch {
       setError('Failed to delete photo.')
     }
+  }
+
+  const retryLocalUpload = async (itemId: string, tempId: string) => {
+    const list = localUploads[itemId] ?? []
+    const entry = list.find((l) => l.tempId === tempId)
+    if (!entry || !entry.file) return
+    // Reset status and call uploadPhoto again with same file
+    setLocalUploads((prev) => ({ ...(prev ?? {}), [itemId]: (prev[itemId] ?? []).map((u) => (u.tempId === tempId ? { ...u, status: 'compressing' } : u)) }))
+    await uploadPhoto(itemId, { file: entry.file, caption: entry.caption })
+  }
+
+  const removeLocalUpload = (itemId: string, tempId: string) => {
+    setLocalUploads((prev) => ({ ...(prev ?? {}), [itemId]: (prev[itemId] ?? []).filter((u) => u.tempId !== tempId) }))
   }
 
   const handleComplete = async () => {
@@ -398,6 +458,11 @@ export default function InspectionExecutionPage() {
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
+      {toastMessage ? (
+        <div className="fixed left-1/2 top-6 z-50 -translate-x-1/2 rounded-2xl bg-slate-800/95 px-4 py-2 text-sm text-white shadow-lg">
+          {toastMessage}
+        </div>
+      ) : null}
       <div className="mx-auto max-w-4xl px-4 pb-24 pt-6">
         {/* Header */}
         <div className="mb-6 rounded-[32px] bg-slate-900/95 px-5 py-4 shadow-[0_25px_60px_rgba(0,0,0,0.25)]">
@@ -559,6 +624,13 @@ export default function InspectionExecutionPage() {
                       }}
                       onPhotoDelete={(itemId, photoId) => {
                         void deletePhoto(itemId, photoId)
+                      }}
+                      localUploads={localUploads[item.id] ?? []}
+                      onRetryLocalUpload={(itemId, tempId) => {
+                        void retryLocalUpload(itemId, tempId)
+                      }}
+                      onRemoveLocalUpload={(itemId, tempId) => {
+                        removeLocalUpload(itemId, tempId)
                       }}
                     />
                     {validationErrors[item.id] && (

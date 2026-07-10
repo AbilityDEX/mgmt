@@ -113,9 +113,8 @@ export async function GET(request: Request) {
     },
     defects: defects.map((defect) => {
       const machine = machineById.get(defect.machine_id as string)
-      const assigned = (defect.assigned_to as string | null)
-        ? profileByUserId.get(defect.assigned_to as string)
-        : null
+      const assignedId = (defect.assigned_to as string | null) ?? null
+      const assignedProfile = assignedId ? profileByUserId.get(assignedId) ?? null : null
 
       return {
         id: defect.id as string,
@@ -127,8 +126,8 @@ export async function GET(request: Request) {
         description: (defect.description as string | null) ?? null,
         severity: defect.severity as DefectSeverity,
         status: defect.status as DefectStatus,
-        assignedTo: (defect.assigned_to as string | null) ?? null,
-        assignedToName: assigned?.fullName ?? 'Unassigned',
+        assignedTo: assignedId,
+        assignedToName: assignedId ? (assignedProfile?.fullName ?? 'Unknown User') : 'Unassigned',
         createdBy: defect.created_by as string,
         createdAt: defect.created_at as string,
         updatedAt: defect.updated_at as string,

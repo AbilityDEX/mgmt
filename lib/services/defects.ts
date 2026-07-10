@@ -45,6 +45,7 @@ export async function ensureDefectForFailedInspectionItem(params: {
         severity: params.severity ?? 'Medium',
         status: 'Open',
         created_by: params.createdBy,
+        assigned_to: params.createdBy,
       },
     ])
     .select('id, assigned_to')

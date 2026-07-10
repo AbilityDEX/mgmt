@@ -1,7 +1,7 @@
 import fs from 'fs/promises'
 import path from 'path'
 import crypto from 'crypto'
-import { pathToFileURL } from 'url'
+ 
 
 import { serverConfigErrorMessage, supabaseAdmin, SYSTEM_ADMIN_EMAIL } from '@/lib/admin'
 import { addLondonDays, formatInspectionDateTime, getLondonDateKey, getLondonDateTimeParts, startOfLondonDay } from '@/lib/inspectionTime'
@@ -883,10 +883,20 @@ async function buildPdfValidation(): Promise<PdfValidation> {
   }
 
   const pdfBuffer = Buffer.from(latest.data.pdf_base64 as string, 'base64')
-  const { PDFParse } = await import('pdf-parse')
-  PDFParse.setWorker(
-    pathToFileURL(path.join(process.cwd(), 'node_modules', 'pdf-parse', 'dist', 'pdf-parse', 'web', 'pdf.worker.mjs')).toString()
-  )
+  // Import the Node/CJS build of pdf-parse to ensure server-compatible parsing
+  // and avoid loading the browser/web worker bundle which expects DOM globals.
+  // Load the Node/CJS build at runtime using a dynamic require to avoid the
+  // bundler resolving the ESM/browser build. This ensures server-side code
+  // loads the CJS implementation directly.
+  // eslint-disable-next-line no-eval
+  const runtimeRequire: NodeRequire = eval('require')
+  const pdfCjsPath = path.join(process.cwd(), 'node_modules', 'pdf-parse', 'dist', 'node', 'cjs', 'index.cjs')
+  // Require the CJS bundle directly from node_modules
+  const pdfParseModule = runtimeRequire(pdfCjsPath)
+  const { PDFParse } = pdfParseModule
+  // Use the Node-compatible parsing path. Avoid loading the browser web worker
+  // (`web/pdf.worker.mjs`) which expects DOM globals like `DOMMatrix`.
+  // Calling PDFParse without setting a web worker uses the package's Node path.
   const parser = new PDFParse({ data: pdfBuffer })
   const parsed = await parser.getText()
   const text = parsed.text

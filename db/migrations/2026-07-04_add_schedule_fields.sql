@@ -15,3 +15,4 @@ WHERE s.machine_template_id = mit.id
 
 -- Add index for lookup by machine_template_id
 CREATE INDEX IF NOT EXISTS idx_inspection_schedules_machine_template_id ON inspection_schedules(machine_template_id);
+

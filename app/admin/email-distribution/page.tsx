@@ -23,7 +23,7 @@ type MachineOption = {
 const deliveryOptions = [
   { value: 'all_inspections', label: 'All inspections' },
   { value: 'passed_inspections', label: 'Passed inspections' },
-  { value: 'failed_inspections', label: 'Failed inspections' },
+  { value: 'failed_inspections', label: 'Defects' },
   { value: 'failed_only', label: 'Failed only' },
   { value: 'defects_only', label: 'Defects only' },
 ] as const

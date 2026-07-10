@@ -14,7 +14,6 @@ export default function AdminDashboardPage() {
     { icon: '📬', title: 'Archive Logs', description: 'Track PDF/email/archive delivery outcomes', href: '/admin/archive-logs' },
     { icon: '✅', title: 'Runtime Verification', description: 'Validate scheduling, archive and retention health', href: '/admin/runtime-verification' },
     { icon: '🩺', title: 'System Health', description: 'Run full diagnostics, safe repair and release checks', href: '/admin/system-health' },
-    { icon: '❌', title: 'Failed Inspections', description: 'Track issues and corrective actions', href: '/admin/failed-inspections' },
     { icon: '⏰', title: 'Overdue Machines', description: 'See late inspections at a glance', href: '/admin/overdue' },
     { icon: '👥', title: 'Users', description: 'Add, edit and remove system users', href: '/admin/users' },
   ]

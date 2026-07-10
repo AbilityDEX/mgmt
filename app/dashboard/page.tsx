@@ -316,10 +316,10 @@ export default function DashboardPage() {
             <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Compliance Percentage</p>
             <p className="mt-2 text-2xl font-semibold text-white">{scheduleWidgets.compliancePercentage}%</p>
           </article>
-          <article className="rounded-[24px] bg-slate-900/90 p-4 shadow-xl shadow-black/20">
-            <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Failed Inspections</p>
-            <p className="mt-2 text-2xl font-semibold text-rose-300">{scheduleWidgets.failedInspections}</p>
-          </article>
+          <Link href="/admin/defects" className="rounded-[24px] bg-slate-900/90 p-4 shadow-xl shadow-black/20">
+            <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Defects</p>
+            <p className="mt-2 text-2xl font-semibold text-rose-300">{defectWidgets.openDefects}</p>
+          </Link>
           <article className="rounded-[24px] bg-slate-900/90 p-4 shadow-xl shadow-black/20">
             <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Pass Rate</p>
             <p className="mt-2 text-2xl font-semibold text-emerald-300">{scheduleWidgets.passRate}%</p>

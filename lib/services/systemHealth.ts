@@ -890,13 +890,92 @@ async function buildPdfValidation(): Promise<PdfValidation> {
   // loads the CJS implementation directly.
   // eslint-disable-next-line no-eval
   const runtimeRequire: NodeRequire = eval('require')
-  const pdfCjsPath = path.join(process.cwd(), 'node_modules', 'pdf-parse', 'dist', 'node', 'cjs', 'index.cjs')
-  // Require the CJS bundle directly from node_modules
-  const pdfParseModule = runtimeRequire(pdfCjsPath)
-  const { PDFParse } = pdfParseModule
+  // Require the package name so Node/resolution picks the CJS package entry
+  // (which exports `PDFParse`). Using the package specifier keeps the runtime
+  // resolution logic consistent across environments.
+  const pdfParseModule = runtimeRequire('pdf-parse')
+  // Resolve the actual constructor across possible bundler/interop shapes.
+  const resolvePDFParseConstructor = (mod: any) => {
+    if (!mod) return undefined
+    // Module itself is the constructor (rare)
+    if (typeof mod === 'function') return mod
+    // CommonJS named export
+    if (mod.PDFParse) return mod.PDFParse
+    // ESM default wrapping: default may be the constructor or contain PDFParse
+    if (mod.default) {
+      if (typeof mod.default === 'function') return mod.default
+      if (mod.default.PDFParse) return mod.default.PDFParse
+    }
+    return undefined
+  }
+
+  let PDFParse = resolvePDFParseConstructor(pdfParseModule)
+  // Temporary debug logging to inspect the runtime-loaded module shape
+  // and compare CommonJS `require` vs dynamic `import` inside the Next server.
+  // eslint-disable-next-line no-console
+  console.log('pdf-parse module keys (require):', Object.keys(pdfParseModule))
+  // eslint-disable-next-line no-console
+  console.dir(pdfParseModule, { depth: 5 })
+  // eslint-disable-next-line no-console
+  console.log('typeof PDFParse (require):', typeof PDFParse)
+  // eslint-disable-next-line no-console
+  console.dir(PDFParse, { depth: 3 })
+
+  // Also try dynamic ESM import() to compare what the bundler/runtime returns.
+  let pdfParseModuleImport: any = undefined
+  try {
+    // `import()` may return a namespace with `default` or named exports.
+    // This runs inside the compiled Next server process.
+    // eslint-disable-next-line no-await-in-loop
+    // eslint-disable-next-line no-console
+    pdfParseModuleImport = await import('pdf-parse')
+    // eslint-disable-next-line no-console
+    console.log('pdf-parse module keys (import):', Object.keys(pdfParseModuleImport))
+    // eslint-disable-next-line no-console
+    console.dir(pdfParseModuleImport, { depth: 5 })
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.log('dynamic import("pdf-parse") failed in this runtime:', e && (e as Error).message)
+  }
+  // If constructor not found via require path, try the dynamic import shape.
+  if (!PDFParse && pdfParseModuleImport) {
+    PDFParse = resolvePDFParseConstructor(pdfParseModuleImport)
+  }
+  // Compare the `require` obtained via eval to any direct `require` (if present)
+  // and print the shape returned by each to detect bundler wrapping.
+  try {
+    // eslint-disable-next-line no-console
+    const directRequire = typeof require !== 'undefined' ? require : undefined
+    // eslint-disable-next-line no-console
+    console.log('direct require available:', typeof directRequire === 'function')
+    // eslint-disable-next-line no-console
+    console.log('runtimeRequire === directRequire:', directRequire === runtimeRequire)
+    if (directRequire) {
+      try {
+        const pdfParseModuleDirect = directRequire('pdf-parse')
+        // eslint-disable-next-line no-console
+        console.log('pdf-parse module keys (direct require):', Object.keys(pdfParseModuleDirect))
+        // eslint-disable-next-line no-console
+        console.dir(pdfParseModuleDirect, { depth: 5 })
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.log('direct require("pdf-parse") threw:', err && (err as Error).message)
+      }
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.log('require comparison check failed:', err && (err as Error).message)
+  }
   // Use the Node-compatible parsing path. Avoid loading the browser web worker
   // (`web/pdf.worker.mjs`) which expects DOM globals like `DOMMatrix`.
   // Calling PDFParse without setting a web worker uses the package's Node path.
+  if (!PDFParse) {
+    // eslint-disable-next-line no-console
+    console.log('Unable to resolve PDFParse constructor from pdf-parse module shapes; aborting PDF validation.')
+    return { status: 'WARNING', contains, details: 'PDF parsing module shape mismatch; cannot validate PDF.' }
+  }
+
+  // eslint-disable-next-line new-cap
   const parser = new PDFParse({ data: pdfBuffer })
   const parsed = await parser.getText()
   const text = parsed.text

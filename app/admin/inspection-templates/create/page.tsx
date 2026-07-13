@@ -2,6 +2,7 @@
 
 import { useRef, useState } from 'react'
 import Link from 'next/link'
+import Header from '@/components/Header'
 import { useRouter } from 'next/navigation'
 import { supabaseClient } from '@/lib/supabase'
 
@@ -186,12 +187,11 @@ export default function CreateInspectionTemplatePage() {
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
       <div className="mx-auto max-w-4xl px-4 pb-24 pt-6">
-        <div className="mb-6 rounded-[32px] bg-slate-900/95 px-5 py-4 shadow-[0_25px_60px_rgba(0,0,0,0.25)]">
+        <div className="mb-6">
           <Link href="/admin/inspection-templates" className="mb-3 inline-flex rounded-3xl bg-slate-800 px-4 py-3 text-sm font-semibold text-slate-100 shadow-[0_10px_25px_rgba(0,0,0,0.2)] transition hover:bg-slate-700">
             ← Back
           </Link>
-          <p className="text-xs uppercase tracking-[0.35em] text-emerald-400">Inspection Setup</p>
-          <h1 className="mt-2 text-2xl font-semibold">Create Template</h1>
+          <Header title="Create Template" subtitle="Inspection Setup" />
         </div>
 
         {success ? <div className="mb-4 rounded-[20px] bg-emerald-600/15 px-5 py-3 text-sm font-medium text-emerald-300">{success}</div> : null}

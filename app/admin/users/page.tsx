@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
+import Header from '@/components/Header'
 import { supabaseClient } from '@/lib/supabase'
 
 type UserRow = {
@@ -323,24 +324,26 @@ export default function AdminUsersPage() {
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
       <div className="mx-auto max-w-6xl px-4 pb-24 pt-6">
-        <div className="mb-6 flex flex-col gap-4 rounded-[32px] bg-slate-900/95 px-5 py-4 shadow-[0_25px_60px_rgba(0,0,0,0.25)] sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <Link
-              href="/admin"
-              className="mb-3 inline-flex rounded-3xl bg-slate-800 px-4 py-3 text-sm font-semibold text-slate-100 shadow-[0_10px_25px_rgba(0,0,0,0.2)] transition hover:bg-slate-700 sm:mb-0"
-            >
-              {'\u2190'} Back
-            </Link>
-            <p className="text-xs uppercase tracking-[0.35em] text-emerald-400">User Management</p>
-            <h1 className="mt-2 text-2xl font-semibold">Users</h1>
-          </div>
-          <button
-            type="button"
-            onClick={() => { resetForm(); setIsModalOpen(true) }}
-            className="inline-flex items-center justify-center rounded-3xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-[0_10px_25px_rgba(16,185,129,0.25)] transition hover:bg-emerald-500"
+        <div className="mb-6">
+          <Link
+            href="/admin"
+            className="mb-3 inline-flex rounded-3xl bg-slate-800 px-4 py-3 text-sm font-semibold text-slate-100 shadow-[0_10px_25px_rgba(0,0,0,0.2)] transition hover:bg-slate-700 sm:mb-0"
           >
-            + Add User
-          </button>
+            {'\u2190'} Back
+          </Link>
+          <Header
+            title="Users"
+            subtitle="User Management"
+            right={(
+              <button
+                type="button"
+                onClick={() => { resetForm(); setIsModalOpen(true) }}
+                className="inline-flex items-center justify-center rounded-3xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-[0_10px_25px_rgba(16,185,129,0.25)] transition hover:bg-emerald-500"
+              >
+                + Add User
+              </button>
+            )}
+          />
         </div>
 
         {success ? (

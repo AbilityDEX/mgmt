@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
+import Header from '@/components/Header'
 import { useRouter } from 'next/navigation'
 import { formatInspectionDateTime } from '@/lib/inspectionTime'
 import { setCurrentUser, useCurrentUser } from '@/lib/store'
@@ -250,16 +251,9 @@ export default function DashboardPage() {
           </Link>
         </div>
 
-        <header className="rounded-[32px] bg-slate-900/90 p-5 shadow-[0_25px_60px_rgba(0,0,0,0.25)] backdrop-blur-sm">
-          <div className="flex items-center gap-4">
-            <img src="/images/mgpc-logo.png" alt="MGPC Logo" className="h-10 w-auto" />
-            <div>
-              <p className="text-xs uppercase tracking-[0.35em] text-emerald-400">MGPC Inspect</p>
-              <h1 className="mt-2 text-3xl font-semibold">Good Morning {currentUser.name}</h1>
-              <p className="mt-3 text-sm text-slate-400">Your inspection overview is ready. Select a machine to begin.</p>
-            </div>
-          </div>
-        </header>
+        <div className="mb-2">
+          <Header title={`Good Morning ${currentUser.name}`} subtitle="Your inspection overview is ready. Select a machine to begin." />
+        </div>
 
         <section className="mt-6 rounded-[28px] bg-slate-900/80 px-5 py-4 shadow-xl shadow-black/20">
           <div className="flex items-center justify-between">

@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import Header from '@/components/Header'
 
 export default function AdminDashboardPage() {
   const menuItems = [
@@ -28,16 +29,9 @@ export default function AdminDashboardPage() {
           <h1 className="text-xl font-semibold">Admin Dashboard</h1>
         </div>
 
-        <header className="rounded-[32px] bg-slate-900/95 p-5 shadow-[0_25px_60px_rgba(0,0,0,0.25)] backdrop-blur-sm">
-          <div className="flex items-center gap-4">
-            <img src="/images/mgpc-logo.png" alt="MGPC Logo" className="h-10 w-auto" />
-            <div>
-              <p className="text-xs uppercase tracking-[0.35em] text-emerald-400">MGPC Inspect</p>
-              <h2 className="mt-3 text-3xl font-semibold">Administrator</h2>
-              <p className="mt-2 text-sm text-slate-400">Access system controls, reports, and operational settings.</p>
-            </div>
-          </div>
-        </header>
+        <div className="mb-6">
+          <Header title="Administrator" subtitle="Access system controls, reports, and operational settings." />
+        </div>
 
         <section className="mt-6 grid gap-4">
           {menuItems.map((item) => (

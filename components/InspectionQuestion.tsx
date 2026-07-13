@@ -90,7 +90,7 @@ export default function InspectionQuestion({
                 type="button"
                 disabled={isReadOnly}
                 onClick={() => handleAnswerChange('pass')}
-                className={`flex-1 rounded-2xl px-4 py-3 text-sm font-semibold transition ${
+                className={`flex-1 rounded-3xl px-4 py-3 text-sm font-semibold transition ${
                   isReadOnly
                     ? 'cursor-not-allowed bg-slate-800 text-slate-400'
                     : localAnswer === 'pass'
@@ -104,7 +104,7 @@ export default function InspectionQuestion({
                 type="button"
                 disabled={isReadOnly}
                 onClick={() => handleAnswerChange('fail')}
-                className={`flex-1 rounded-2xl px-4 py-3 text-sm font-semibold transition ${
+                className={`flex-1 rounded-3xl px-4 py-3 text-sm font-semibold transition ${
                   isReadOnly
                     ? 'cursor-not-allowed bg-slate-800 text-slate-400'
                     : localAnswer === 'fail'
@@ -146,21 +146,21 @@ export default function InspectionQuestion({
                   }}
                 />
                 {( (localAnswer === 'fail' && (item.failAllowPhotos || item.failRequirePhotos)) || (localAnswer === 'pass' && item.passAllowPhotos) ) && (
-                  <div>
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={(item.photos ?? []).length >= (item.photoMaxCount ?? 10)}
-                      className={`mt-2 rounded-2xl px-4 py-2 text-sm font-semibold ${
-                        (item.photos ?? []).length >= (item.photoMaxCount ?? 10)
-                          ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                          : 'bg-emerald-600/15 text-emerald-300 hover:bg-emerald-600/25'
-                      }`}
-                    >
-                      Add Photo
-                    </button>
-                    <p className="mt-2 text-xs text-slate-400">{(item.photos ?? []).length} / {(item.photoMaxCount ?? 10)} photos</p>
-                  </div>
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={(item.photos ?? []).length >= (item.photoMaxCount ?? 10)}
+                        className={`mt-2 rounded-3xl px-4 py-2 text-sm font-semibold ${
+                          (item.photos ?? []).length >= (item.photoMaxCount ?? 10)
+                            ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                            : 'bg-emerald-600/15 text-emerald-300 hover:bg-emerald-600/25'
+                        }`}
+                      >
+                        Add Photo
+                      </button>
+                      <p className="mt-2 text-xs text-slate-400">{(item.photos ?? []).length} / {(item.photoMaxCount ?? 10)} photos</p>
+                    </div>
                 )}
               </div>
             )}

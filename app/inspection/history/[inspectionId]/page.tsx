@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
+import Header from '@/components/Header'
 import { useParams } from 'next/navigation'
 import { formatInspectionDateTime } from '@/lib/inspectionTime'
 import { supabaseClient } from '@/lib/supabase'
@@ -67,23 +68,21 @@ export default function InspectionHistoryPage() {
       <div className="mx-auto max-w-4xl px-4 pb-24 pt-6 print:pb-0 print:pt-0">
         {/* Header */}
         <div className="mb-6 rounded-[32px] bg-slate-900/95 px-5 py-4 shadow-[0_25px_60px_rgba(0,0,0,0.25)] print:rounded-none print:bg-white print:shadow-none">
-          <div className="flex items-center justify-between gap-4 print:hidden">
-            <div>
-              <Link
-                href={`/inspection/${inspection?.machineId ?? ''}`}
-                className="mb-3 inline-flex rounded-3xl bg-slate-800 px-4 py-3 text-sm font-semibold text-slate-100 shadow-[0_10px_25px_rgba(0,0,0,0.2)] transition hover:bg-slate-700"
-              >
-                ← Back
-              </Link>
-              <p className="text-xs uppercase tracking-[0.35em] text-emerald-400">Inspection Record</p>
-              <h1 className="mt-2 text-2xl font-semibold">{inspection?.machineName ?? 'Inspection'}</h1>
-            </div>
-            <button
-              onClick={handlePrint}
-              className="rounded-3xl bg-emerald-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-emerald-500"
+          <div className="print:hidden">
+            <Link
+              href={`/inspection/${inspection?.machineId ?? ''}`}
+              className="mb-3 inline-flex rounded-3xl bg-slate-800 px-4 py-3 text-sm font-semibold text-slate-100 shadow-[0_10px_25px_rgba(0,0,0,0.2)] transition hover:bg-slate-700"
             >
-              🖨️ Print
-            </button>
+              ← Back
+            </Link>
+            <Header title={inspection?.machineName ?? 'Inspection'} subtitle="Inspection Record" right={(
+              <button
+                onClick={handlePrint}
+                className="rounded-3xl bg-emerald-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-emerald-500"
+              >
+                🖨️ Print
+              </button>
+            )} />
           </div>
           <p className="print:mt-0 print:text-xl print:font-bold print:text-slate-900 mt-4 text-xs uppercase tracking-[0.35em] text-emerald-400">
             Inspection Record

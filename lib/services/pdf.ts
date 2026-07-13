@@ -180,69 +180,96 @@ async function addCompanyHeader(
   const primary = company.primaryColor || '#0f172a'
   const accent = company.accentColor || '#475569'
 
+  const margin = 36
+  const contentWidth = doc.page.width - margin * 2
   const currentY = doc.y
-  // Always load the single supplied PNG logo from the public images folder.
+
+  // Logo on left (disk path), large title to the right, metadata stacked on the far right.
   const logoPath = path.join(process.cwd(), 'public', 'images', 'mgpc-logo.png')
-  const usedLogo = await addImageSafe(doc, logoPath, { fit: [140, 48], x: 36, y: currentY })
+  // Draw logo if available
+  await addImageSafe(doc, logoPath, { fit: [140, 48], x: margin, y: currentY })
 
-  // Title centered, metadata right-aligned
-  // Reserve a row height that fits the logo
-  const rowHeight = 48
-  // Title centered
-  doc.fillColor(primary).fontSize(20).text(title, 36, currentY, { width: doc.page.width - 72, align: 'center' })
+  // Title — prominent and slightly larger for engineering report
+  const titleX = margin + 160
+  const titleWidth = contentWidth - 160
+  doc.fillColor('#0f172a').fontSize(22).text(title, titleX, currentY + 2, { width: titleWidth - 120, align: 'left' })
 
-  // Metadata (Report ID, Inspection Date) aligned right
+  // Right side metadata
+  const metaX = margin + titleWidth - 100
   const metaParts: string[] = []
   if (reference) metaParts.push(`Report ID: ${reference}`)
   if (completedAt) metaParts.push(`Inspection Date: ${formatDateOnly(completedAt)}`)
   if (metaParts.length > 0) {
-    doc.fillColor('#64748b').fontSize(9).text(metaParts.join('  '), 36, currentY, { width: doc.page.width - 72, align: 'right' })
+    doc.fillColor('#64748b').fontSize(9).text(metaParts.join('\n'), metaX, currentY + 4, { width: 100, align: 'right' })
   }
 
-  // Thin divider under header using primary color (MGPC green by default)
-  const dividerY = currentY + rowHeight + 8
+  // Thin divider under header using primary color
+  const dividerY = currentY + 56
   doc.save()
-  doc.moveTo(36, dividerY)
-  doc.lineTo(doc.page.width - 36, dividerY)
+  doc.moveTo(margin, dividerY)
+  doc.lineTo(doc.page.width - margin, dividerY)
   doc.lineWidth(1)
   doc.strokeColor(company.primaryColor || '#0f766e')
   doc.stroke()
   doc.restore()
 
   // Advance cursor past header
-  doc.y = dividerY + 12
+  doc.y = dividerY + 14
 }
 
 function addResultBanner(doc: PDFKit.PDFDocument, result: 'PASS' | 'FAIL' | 'INCOMPLETE') {
-  const label = result === 'PASS' ? 'PASS' : 'FAIL'
-  const background = label === 'PASS' ? '#16a34a' : '#dc2626'
   const top = doc.y
+  const fullWidth = doc.page.width - 72
+  const badgeWidth = 120
+  const badgeHeight = 36
+  const badgeX = doc.page.width - 36 - badgeWidth
 
+  // Draw subtle box for result on the right
   doc.save()
-  doc.roundedRect(36, top, doc.page.width - 72, 28, 6).fill(background)
-  doc
-    .fillColor('#ffffff')
-    .fontSize(14)
-    .text(`Inspection Result: ${label}`, 36, top + 8, {
-      width: doc.page.width - 72,
-      align: 'center',
-    })
+  if (result === 'PASS') {
+    doc.roundedRect(badgeX, top, badgeWidth, badgeHeight, 6).fill('#16a34a')
+    doc.fillColor('#ffffff').fontSize(12).text('PASS', badgeX, top + 10, { width: badgeWidth, align: 'center' })
+  } else if (result === 'FAIL') {
+    doc.roundedRect(badgeX, top, badgeWidth, badgeHeight, 6).fill('#dc2626')
+    doc.fillColor('#ffffff').fontSize(12).text('FAIL', badgeX, top + 10, { width: badgeWidth, align: 'center' })
+  } else {
+    doc.roundedRect(badgeX, top, badgeWidth, badgeHeight, 6).fill('#b45309')
+    doc.fillColor('#ffffff').fontSize(12).text('INCOMPLETE', badgeX, top + 10, { width: badgeWidth, align: 'center' })
+  }
   doc.restore()
-  doc.moveDown(2.2)
+
+  // Add a small title for the report area
+  doc.moveDown(0.6)
 }
 
 function addMetadataTable(doc: PDFKit.PDFDocument, details: Array<[string, string]>) {
-  for (const [label, value] of details) {
-    doc.fontSize(10).fillColor('#334155').text(`${label}: `, { continued: true })
-    const resultColor = label === 'Result'
-      ? value === 'PASS'
-        ? '#166534'
-        : value === 'FAIL'
-          ? '#b91c1c'
-          : '#92400e'
-      : '#0f172a'
-    doc.fillColor(resultColor).text(value)
+  // Render a clean two-column summary with labels and values
+  const margin = 36
+  const colGap = 12
+  const colWidth = (doc.page.width - margin * 2 - colGap) / 2
+  const startX = margin
+  let x = startX
+  let y = doc.y
+
+  doc.fontSize(10).fillColor('#475569')
+  for (let i = 0; i < details.length; i += 1) {
+    const [label, value] = details[i]
+    // label
+    doc.fontSize(9).fillColor('#94a3b8').text(`${label}`, x, y, { width: colWidth })
+    // value below label
+    doc.fontSize(11).fillColor('#0f172a').text(`${value}`, x, y + 12, { width: colWidth })
+
+    // move to next column
+    if (x === startX) {
+      x = startX + colWidth + colGap
+    } else {
+      x = startX
+      y += 36
+    }
   }
+
+  // Advance doc.y to after the table
+  doc.y = y + 44
 }
 
 function ensureSectionSpace(doc: PDFKit.PDFDocument, minHeight = 120) {
@@ -252,45 +279,70 @@ function ensureSectionSpace(doc: PDFKit.PDFDocument, minHeight = 120) {
 }
 
 async function addChecklistSection(doc: PDFKit.PDFDocument, items: InspectionPdfItem[]) {
-  doc.moveDown(1)
-  doc.fontSize(12).fillColor('#0f172a').text('Checklist')
-  doc.moveDown(0.3)
+  // Modern table-like checklist
+  ensureSectionSpace(doc, 120)
+  doc.fontSize(12).fillColor('#0f172a').text('Inspection Details')
+  doc.moveDown(0.4)
+
+  const margin = 36
+  const tableWidth = doc.page.width - margin * 2
+  const colNo = 36
+  const colQuestion = Math.floor(tableWidth * 0.55)
+  const colAnswer = Math.floor(tableWidth * 0.12)
+  const colComments = tableWidth - colNo - colQuestion - colAnswer - 12
+
+  // Header row
+  const headerY = doc.y
+  doc.fontSize(9).fillColor('#94a3b8')
+  doc.text('#', margin, headerY, { width: colNo })
+  doc.text('Question', margin + colNo + 8, headerY, { width: colQuestion })
+  doc.text('Result', margin + colNo + 8 + colQuestion + 8, headerY, { width: colAnswer, align: 'center' })
+  doc.text('Comments', margin + colNo + 8 + colQuestion + 8 + colAnswer + 8, headerY, { width: colComments })
+  doc.moveDown(0.8)
 
   for (const item of items) {
-    doc.fontSize(10).fillColor('#0f172a').text(`${item.displayOrder}. ${toDisplay(item.question)}`)
-    if (item.description) {
-      doc.fillColor('#6b7280').fontSize(9).text(item.description)
+    ensureSectionSpace(doc, 80)
+    const y = doc.y
+    // No.
+    doc.fontSize(10).fillColor('#64748b').text(String(item.displayOrder), margin, y, { width: colNo })
+    // Question
+    doc.fontSize(10).fillColor('#0f172a').text(toDisplay(item.question), margin + colNo + 8, y, { width: colQuestion })
+    // Result badge
+    const resultX = margin + colNo + 8 + colQuestion + 8
+    if (item.answer === 'pass') {
+      doc.roundedRect(resultX + 6, y - 2, colAnswer - 12, 18, 6).fill('#16a34a')
+      doc.fillColor('#ffffff').fontSize(9).text('PASS', resultX + 6, y + 2, { width: colAnswer - 12, align: 'center' })
+    } else if (item.answer === 'fail') {
+      doc.roundedRect(resultX + 6, y - 2, colAnswer - 12, 18, 6).fill('#dc2626')
+      doc.fillColor('#ffffff').fontSize(9).text('FAIL', resultX + 6, y + 2, { width: colAnswer - 12, align: 'center' })
+    } else {
+      doc.roundedRect(resultX + 6, y - 2, colAnswer - 12, 18, 6).fill('#334155')
+      doc.fillColor('#ffffff').fontSize(9).text('N/A', resultX + 6, y + 2, { width: colAnswer - 12, align: 'center' })
     }
-    doc.fillColor('#475569').text(`Answer: ${toDisplay(item.answer)}`)
-    doc.text(`Comments: ${toDisplay(item.comments)}`)
 
+    // Comments
+    doc.fontSize(9).fillColor('#475569').text(toDisplay(item.comments), margin + colNo + 8 + colQuestion + 8 + colAnswer + 8, y, { width: colComments })
+
+    // Photos (small thumbnails after row)
     const photos = getPhotoCandidates(item.photos)
     if (photos.length > 0) {
-      doc.fillColor('#475569').text(`Photos: ${photos.length} attached`)
-      for (const photo of photos) {
-        ensureSectionSpace(doc, 180)
-        const added = await addImageSafe(doc, photo, { fit: [220, 140] })
+      doc.moveDown(0.6)
+      const thumbSize = 90
+      let thumbX = margin + colNo + 8
+      const startImgY = doc.y
+      for (const photo of photos.slice(0, 4)) {
+        ensureSectionSpace(doc, thumbSize + 20)
+        const added = await addImageSafe(doc, photo, { fit: [thumbSize, thumbSize], x: thumbX, y: doc.y })
         if (!added) {
-          doc.fillColor('#475569').text('Photo: N/A')
+          doc.fontSize(9).fillColor('#475569').text('Photo: N/A', thumbX, doc.y)
         }
-        doc.moveDown(0.2)
+        thumbX += thumbSize + 8
       }
+      doc.y = startImgY + thumbSize + 6
     } else {
-      doc.fillColor('#475569').text('Photos: N/A')
+      doc.moveDown(0.6)
     }
-
-    if (item.signatureData) {
-      doc.fillColor('#475569').text('Signature:')
-      const added = await addImageSafe(doc, item.signatureData, { fit: [180, 70] })
-      if (!added) {
-        doc.fillColor('#475569').text('Signature: N/A')
-      }
-      doc.moveDown(0.2)
-    } else {
-      doc.fillColor('#475569').text('Signature: N/A')
-    }
-
-    doc.moveDown(0.3)
+    doc.moveDown(0.4)
   }
 }
 
@@ -323,46 +375,74 @@ async function addSignaturesSection(doc: PDFKit.PDFDocument, items: InspectionPd
 }
 
 async function addDefectsSection(doc: PDFKit.PDFDocument, defects: InspectionPdfDefect[]) {
+  // Dedicated Defect Summary
   doc.moveDown(0.5)
-  doc.fontSize(12).fillColor('#0f172a').text('Defects')
+  doc.fontSize(12).fillColor('#0f172a').text('Defect Summary')
   doc.moveDown(0.3)
 
   if (defects.length === 0) {
-    doc.fontSize(10).fillColor('#475569').text('Defects: N/A')
+    doc.fontSize(10).fillColor('#475569').text('None')
     return
   }
 
   for (const defect of defects) {
-    doc.fontSize(10).fillColor('#0f172a').text(`${toDisplay(defect.title)} [${toDisplay(defect.severity)}] - ${toDisplay(defect.status)}`)
-    doc.fillColor('#475569').text(`Description: ${toDisplay(defect.description)}`)
+    ensureSectionSpace(doc, 160)
+    // Heading with severity badge
+    const y = doc.y
+    doc.fontSize(11).fillColor('#0f172a').text(toDisplay(defect.title), 36, y)
+    const sevX = doc.page.width - 160
+    const severityLabel = toDisplay(defect.severity).toUpperCase()
+    doc.roundedRect(sevX, y - 2, 100, 18, 6).fill('#f1f5f9')
+    doc.fillColor('#0f172a').fontSize(9).text(severityLabel, sevX, y + 2, { width: 100, align: 'center' })
+    doc.moveDown(0.6)
+
+    // Status and description
+    doc.fontSize(10).fillColor('#475569').text(`Status: ${toDisplay(defect.status)}`)
+    if (defect.description) {
+      doc.moveDown(0.2)
+      doc.fontSize(10).fillColor('#475569').text(toDisplay(defect.description))
+    }
+
     const photos = getPhotoCandidates(defect.photos ?? [])
     if (photos.length > 0) {
-      for (const photo of photos) {
-        ensureSectionSpace(doc, 180)
-        const added = await addImageSafe(doc, photo, { fit: [220, 140] })
-        if (!added) doc.fillColor('#475569').text('Defect Photo: N/A')
+      doc.moveDown(0.4)
+      const thumbSize = 120
+      let thumbX = 36
+      const startImgY = doc.y
+      for (const photo of photos.slice(0, 3)) {
+        ensureSectionSpace(doc, thumbSize + 20)
+        const added = await addImageSafe(doc, photo, { fit: [thumbSize, thumbSize], x: thumbX, y: doc.y })
+        if (!added) {
+          doc.fontSize(9).fillColor('#475569').text('Photo: N/A', thumbX, doc.y)
+        }
+        thumbX += thumbSize + 8
       }
-    } else {
-      doc.fillColor('#475569').text('Defect Photos: N/A')
+      doc.y = startImgY + thumbSize + 6
     }
-    doc.moveDown(0.3)
+
+    doc.moveDown(0.6)
   }
 }
 
 function addFooter(doc: PDFKit.PDFDocument, footerText: string, reference?: string, version?: string) {
-  doc.moveDown(1)
-  const meta = [footerText, reference ? `Reference: ${reference}` : null, version ? `Version: ${version}` : null]
-    .filter(Boolean)
-    .join(' | ')
-  doc.fontSize(9).fillColor('#64748b').text(meta)
-
+  // Footer with branding and page numbers
+  const margin = 36
   const range = doc.bufferedPageRange()
   for (let i = range.start; i < range.start + range.count; i += 1) {
     doc.switchToPage(i)
-    doc.fontSize(8)
-    doc.fillColor('#94a3b8')
-    doc.text(`Page ${i + 1} of ${range.count}`, 36, doc.page.height - 28, {
-      width: doc.page.width - 72,
+    const footerY = doc.page.height - 48
+    // small logo on the left
+    const logoPath = path.join(process.cwd(), 'public', 'images', 'mgpc-logo.png')
+    // best-effort draw
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+    addImageSafe(doc, logoPath, { fit: [80, 24], x: margin, y: footerY - 6 })
+
+    // footer text center
+    doc.fontSize(9).fillColor('#94a3b8').text(footerText, margin + 80 + 8, footerY, { width: doc.page.width - margin * 2 - 160, align: 'center' })
+
+    // page number right
+    doc.fontSize(8).fillColor('#94a3b8').text(`Page ${i + 1} of ${range.count}`, margin, footerY, {
+      width: doc.page.width - margin * 2,
       align: 'right',
     })
   }

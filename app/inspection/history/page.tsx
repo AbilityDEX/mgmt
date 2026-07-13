@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
+import Header from '@/components/Header'
 import { useParams, useRouter } from 'next/navigation'
 import { formatInspectionDateTime } from '@/lib/inspectionTime'
 import { supabaseClient } from '@/lib/supabase'
@@ -78,19 +79,15 @@ export default function InspectionHistoryListPage() {
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
       <div className="mx-auto max-w-4xl px-4 pb-24 pt-6">
-        {/* Header */}
-        <div className="mb-6 rounded-[32px] bg-slate-900/95 px-5 py-4 shadow-[0_25px_60px_rgba(0,0,0,0.25)]">
+        <div className="mb-6">
           <Link
             href={`/inspection/${machineId}`}
             className="mb-3 inline-flex rounded-3xl bg-slate-800 px-4 py-3 text-sm font-semibold text-slate-100 shadow-[0_10px_25px_rgba(0,0,0,0.2)] transition hover:bg-slate-700"
           >
             ← Back
           </Link>
-          <p className="text-xs uppercase tracking-[0.35em] text-emerald-400">Inspection History</p>
-          <h1 className="mt-2 text-3xl font-semibold">{machine?.name ?? 'Machine'}</h1>
-          <p className="mt-2 text-sm text-slate-400">
-            {inspections.length} completed inspection{inspections.length !== 1 ? 's' : ''}
-          </p>
+          <Header title={machine?.name ?? 'Machine'} subtitle="Inspection History" />
+          <p className="mt-2 text-sm text-slate-400">{inspections.length} completed inspection{inspections.length !== 1 ? 's' : ''}</p>
         </div>
 
         {/* Error state */}

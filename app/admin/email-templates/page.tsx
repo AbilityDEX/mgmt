@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
+import Header from '@/components/Header'
 import { supabaseClient } from '@/lib/supabase'
 
 type EmailTemplate = {
@@ -99,12 +100,11 @@ export default function AdminEmailTemplatesPage() {
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
       <div className="mx-auto max-w-4xl px-4 pb-24 pt-6">
-        <div className="mb-6 rounded-[32px] bg-slate-900/95 px-5 py-4 shadow-[0_25px_60px_rgba(0,0,0,0.25)]">
+        <div className="mb-6">
           <Link href="/admin" className="mb-3 inline-flex rounded-3xl bg-slate-800 px-4 py-3 text-sm font-semibold text-slate-100 transition hover:bg-slate-700">
             ← Back
           </Link>
-          <p className="text-xs uppercase tracking-[0.35em] text-emerald-400">Administration</p>
-          <h1 className="mt-2 text-2xl font-semibold">Email Templates</h1>
+          <Header title="Email Templates" subtitle="Administration" />
           <p className="mt-2 text-sm text-slate-400">Supported variables: {'{{Machine}} {{Inspector}} {{Department}} {{Result}} {{Date}} {{Reference}} {{Company}} {{NextInspection}}'}</p>
         </div>
 

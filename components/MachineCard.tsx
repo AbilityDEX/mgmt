@@ -56,50 +56,47 @@ function ActionButton({ action }: { action: ButtonAction }) {
 
 export default function MachineCard({ machine, titleHref, primaryAction, secondaryAction }: MachineCardProps) {
   return (
-    <article className="rounded-[28px] bg-slate-900/90 p-5 shadow-[0_18px_40px_rgba(0,0,0,0.22)]">
+    <article className="rounded-[20px] bg-slate-900/95 p-5 shadow-[0_18px_40px_rgba(2,6,23,0.6)]">
       <div className="flex items-start justify-between gap-4">
-        <div>
+        <div className="min-w-0">
           {titleHref ? (
-            <Link href={titleHref} className="text-base font-semibold text-white transition hover:text-emerald-300">
+            <Link href={titleHref} className="text-lg font-semibold text-white transition hover:text-emerald-300 truncate">
               {machine.name}
             </Link>
           ) : (
-            <p className="text-base font-semibold text-white">{machine.name}</p>
+            <p className="text-lg font-semibold text-white truncate">{machine.name}</p>
           )}
-          <p className="mt-3 text-sm text-slate-400">Work Area</p>
-          <p className="text-sm text-slate-200">{machine.area}</p>
-          {machine.assetId ? (
-            <>
-              <p className="mt-3 text-sm text-slate-400">Asset ID</p>
-              <p className="text-sm text-slate-200">{machine.assetId}</p>
-            </>
-          ) : null}
-          {machine.templateName ? (
-            <>
-              <p className="mt-3 text-sm text-slate-400">Inspection Template</p>
-              <p className="text-sm text-slate-200">{machine.templateName}</p>
-            </>
-          ) : null}
-          <p className="mt-3 text-sm text-slate-400">Assigned User</p>
-          <p className="text-sm text-slate-200">{machine.assignedUser}</p>
-          {machine.reminderDaysBeforeDue !== undefined ? (
-            <>
-              <p className="mt-3 text-sm text-slate-400">Reminder</p>
-              <p className="text-sm text-slate-200">{machine.reminderDaysBeforeDue} days before due</p>
-            </>
-          ) : null}
+          <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+            <div>
+              <p className="text-xs text-slate-400">Work Area</p>
+              <p className="text-sm text-slate-200">{machine.area}</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400">Asset ID</p>
+              <p className="text-sm text-slate-200">{machine.assetId ?? '—'}</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400">Template</p>
+              <p className="text-sm text-slate-200">{machine.templateName ?? '—'}</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400">Assigned</p>
+              <p className="text-sm text-slate-200">{machine.assignedUser ?? '—'}</p>
+            </div>
+          </div>
         </div>
-        <StatusBadge label={machine.status} variant={statusVariant[machine.status]} />
+        <div className="shrink-0">
+          <StatusBadge label={machine.status} variant={statusVariant[machine.status]} />
+        </div>
       </div>
 
-      <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 pt-4">
-        <div>
-          <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Inspection</p>
-          <div className="mt-1 flex items-center gap-3">
-            <StatusBadge label={machine.status} variant={statusVariant[machine.status]} />
-            <div className="text-sm text-slate-200">
-              <div className="text-xs text-slate-400">Complete by</div>
-              <div className="font-medium text-white">{machine.inspectionDeadline}</div>
+      <div className="mt-5 flex items-center justify-between gap-3 border-t border-slate-800 pt-4">
+        <div className="flex items-center gap-4">
+          <div>
+            <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Inspection</p>
+            <div className="mt-1 text-sm text-slate-200">
+              <div className="text-xs text-slate-400">Due</div>
+              <div className="font-medium text-white">{machine.inspectionDeadline ?? 'N/A'}</div>
             </div>
           </div>
         </div>

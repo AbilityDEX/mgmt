@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
+import Header from '@/components/Header'
 import { formatInspectionDateTime } from '@/lib/inspectionTime'
 import { supabaseClient } from '@/lib/supabase'
 import StatusBadge from '@/components/StatusBadge'
@@ -76,15 +77,11 @@ export default function AdminReportsPage() {
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
       <div className="mx-auto max-w-md px-4 pb-24 pt-6">
-        <div className="mb-6 flex items-center justify-between rounded-[32px] bg-slate-900/95 p-5 shadow-[0_25px_60px_rgba(0,0,0,0.25)]">
-          <div>
-            <Link href="/admin" className="mb-3 inline-flex rounded-3xl bg-slate-800 px-4 py-3 text-sm font-semibold text-slate-100 transition hover:bg-slate-700">
-              ← Back
-            </Link>
-            <p className="text-xs uppercase tracking-[0.35em] text-emerald-400">Admin Reports</p>
-            <h1 className="mt-2 text-2xl font-semibold">Completed Inspections</h1>
-          </div>
-          <StatusBadge label="Live" variant="success" />
+        <div className="mb-6">
+          <Link href="/admin" className="mb-3 inline-flex rounded-3xl bg-slate-800 px-4 py-3 text-sm font-semibold text-slate-100 transition hover:bg-slate-700">
+            ← Back
+          </Link>
+          <Header title="Completed Inspections" subtitle="Admin Reports" right={<StatusBadge label="Live" variant="success" />} />
         </div>
 
         {error ? <div className="mb-4 rounded-[20px] bg-rose-600/15 px-5 py-3 text-sm text-rose-300">{error}</div> : null}

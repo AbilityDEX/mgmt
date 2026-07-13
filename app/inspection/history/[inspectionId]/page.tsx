@@ -235,7 +235,7 @@ export default function InspectionHistoryPage() {
             {/* Print footer */}
             <div className="print:mt-6 print:border-t print:border-slate-300 print:pt-4 print:text-center print:text-xs print:text-slate-600">
               <p>This inspection record was generated on {formatInspectionDateTime(new Date())}</p>
-              <p className="print:mt-1">MGMT Inspect - Machine Inspection System</p>
+              <p className="print:mt-1">MGPC Inspect - Machine Inspection System</p>
             </div>
           </>
         )}

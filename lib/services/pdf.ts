@@ -170,40 +170,47 @@ function getPhotoCandidates(photos: unknown[]) {
   return candidates
 }
 
-async function addCompanyHeader(doc: PDFKit.PDFDocument, company: CompanyBranding, title: string) {
+async function addCompanyHeader(
+  doc: PDFKit.PDFDocument,
+  company: CompanyBranding,
+  title: string,
+  reference?: string | null,
+  completedAt?: string | null
+) {
   const primary = company.primaryColor || '#0f172a'
   const accent = company.accentColor || '#475569'
 
-  if (company.logoUrl) {
-    const currentY = doc.y
-    const usedLogo = await addImageSafe(doc, company.logoUrl, {
-      fit: [140, 42],
-      x: 36,
-      y: currentY,
-    })
-    if (usedLogo) {
-      doc.y = currentY + 48
-    } else {
-      doc.fillColor(accent).fontSize(9).text('Company Logo: N/A')
-      doc.moveDown(0.2)
-    }
-  } else {
-    doc.fillColor(accent).fontSize(9).text('Company Logo: N/A')
-    doc.moveDown(0.2)
+  const currentY = doc.y
+  // Always load the single supplied PNG logo from the public images folder.
+  const logoPath = path.join(process.cwd(), 'public', 'images', 'mgpc-logo.png')
+  const usedLogo = await addImageSafe(doc, logoPath, { fit: [140, 48], x: 36, y: currentY })
+
+  // Title centered, metadata right-aligned
+  // Reserve a row height that fits the logo
+  const rowHeight = 48
+  // Title centered
+  doc.fillColor(primary).fontSize(20).text(title, 36, currentY, { width: doc.page.width - 72, align: 'center' })
+
+  // Metadata (Report ID, Inspection Date) aligned right
+  const metaParts: string[] = []
+  if (reference) metaParts.push(`Report ID: ${reference}`)
+  if (completedAt) metaParts.push(`Inspection Date: ${formatDateOnly(completedAt)}`)
+  if (metaParts.length > 0) {
+    doc.fillColor('#64748b').fontSize(9).text(metaParts.join('  '), 36, currentY, { width: doc.page.width - 72, align: 'right' })
   }
 
-  doc.fillColor(primary).fontSize(24).text(company.companyName || 'MGPC Inspect')
-  doc.fillColor('#64748b').fontSize(10).text('MGPC Inspect')
-  doc.moveDown(0.25)
-  doc.fillColor(accent).fontSize(10)
-  if (company.address) doc.text(company.address)
-  if (company.telephone) doc.text(company.telephone)
-  if (company.email) doc.text(company.email)
-  if (company.website) doc.text(company.website)
+  // Thin divider under header using primary color (MGPC green by default)
+  const dividerY = currentY + rowHeight + 8
+  doc.save()
+  doc.moveTo(36, dividerY)
+  doc.lineTo(doc.page.width - 36, dividerY)
+  doc.lineWidth(1)
+  doc.strokeColor(company.primaryColor || '#0f766e')
+  doc.stroke()
+  doc.restore()
 
-  doc.moveDown(1)
-  doc.fillColor(primary).fontSize(16).text(title)
-  doc.moveDown(0.5)
+  // Advance cursor past header
+  doc.y = dividerY + 12
 }
 
 function addResultBanner(doc: PDFKit.PDFDocument, result: 'PASS' | 'FAIL' | 'INCOMPLETE') {
@@ -373,8 +380,7 @@ function finalizePdf(doc: PDFKit.PDFDocument) {
 
 export async function createInspectionReportPDF(input: InspectionPdfInput) {
   const doc = createPdfDocument()
-
-  await addCompanyHeader(doc, input.company, input.reportTitle)
+  await addCompanyHeader(doc, input.company, input.reportTitle, input.reference, input.completedAt)
   addResultBanner(doc, input.result)
 
   const companyFooter = [
@@ -426,7 +432,6 @@ export async function createArchivePDF(input: InspectionPdfInput) {
 export async function createSystemHealthPDF(input: SimplePdfInput) {
   const doc = createPdfDocument()
   const company = input.company || { companyName: 'MGPC Inspect' }
-
   await addCompanyHeader(doc, company, input.title)
   for (const line of input.lines) {
     doc.fontSize(11).fillColor('#334155').text(line)

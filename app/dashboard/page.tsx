@@ -251,9 +251,14 @@ export default function DashboardPage() {
         </div>
 
         <header className="rounded-[32px] bg-slate-900/90 p-5 shadow-[0_25px_60px_rgba(0,0,0,0.25)] backdrop-blur-sm">
-          <p className="text-xs uppercase tracking-[0.35em] text-emerald-400">MGPC Inspect</p>
-          <h1 className="mt-2 text-3xl font-semibold">Good Morning {currentUser.name}</h1>
-          <p className="mt-3 text-sm text-slate-400">Your inspection overview is ready. Select a machine to begin.</p>
+          <div className="flex items-center gap-4">
+            <img src="/images/mgpc-logo.png" alt="MGPC Logo" className="h-10 w-auto" />
+            <div>
+              <p className="text-xs uppercase tracking-[0.35em] text-emerald-400">MGPC Inspect</p>
+              <h1 className="mt-2 text-3xl font-semibold">Good Morning {currentUser.name}</h1>
+              <p className="mt-3 text-sm text-slate-400">Your inspection overview is ready. Select a machine to begin.</p>
+            </div>
+          </div>
         </header>
 
         <section className="mt-6 rounded-[28px] bg-slate-900/80 px-5 py-4 shadow-xl shadow-black/20">

@@ -113,6 +113,7 @@ export default function Home() {
     <main className="min-h-screen bg-slate-950 flex items-center justify-center px-4 py-10">
       <div className="w-full max-w-sm rounded-[28px] bg-white shadow-[0_30px_60px_rgba(0,0,0,0.18)] p-7 sm:p-8">
         <div className="space-y-4 text-center">
+          <img src="/images/mgpc-logo.png" alt="MGPC Logo" className="mx-auto h-14 w-auto" />
           <p className="text-sm uppercase tracking-[0.35em] text-emerald-600">MGPC Inspect</p>
           <h1 className="text-3xl font-semibold text-slate-950 sm:text-4xl">Motor Green Plant Check</h1>
           <p className="text-sm text-slate-500">A mobile-first inspection system built for field efficiency.</p>

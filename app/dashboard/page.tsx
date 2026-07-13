@@ -6,13 +6,11 @@ import { useRouter } from 'next/navigation'
 import { formatInspectionDateTime } from '@/lib/inspectionTime'
 import { setCurrentUser, useCurrentUser } from '@/lib/store'
 import { supabaseClient } from '@/lib/supabase'
-import MachineCard from '@/components/MachineCard'
-import type { Machine } from '@/lib/data/machines'
 
 export default function DashboardPage() {
   const router = useRouter()
   const currentUser = useCurrentUser()
-  const [machines, setMachines] = useState<Machine[]>([])
+  
   const [defectWidgets, setDefectWidgets] = useState({
     openDefects: 0,
     criticalDefects: 0,
@@ -74,7 +72,7 @@ export default function DashboardPage() {
       openInspectionId: string | null
     }>
   }>({ dueToday: [], dueThisWeek: [], overdue: [], upcoming: [] })
-  const [isLoading, setIsLoading] = useState(false)
+  
   const [authChecked, setAuthChecked] = useState(false)
 
   useEffect(() => {
@@ -128,29 +126,7 @@ export default function DashboardPage() {
     }
   }, [currentUser])
 
-  const loadMachines = useCallback(async () => {
-    if (!currentUser) return
-    setIsLoading(true)
-    try {
-      const { data: sessionData } = await supabaseClient.auth.getSession()
-      const token = sessionData.session?.access_token
-      if (!token) return
-
-      const isAdmin = ['admin', 'super_admin'].includes((currentUser.role ?? '').toLowerCase())
-      const url = isAdmin
-        ? '/api/machines'
-        : `/api/machines?assigned_to=${encodeURIComponent(currentUser.id ?? '')}`
-
-      const response = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (!response.ok) return
-      const data = await response.json()
-      setMachines(data.machines ?? [])
-    } finally {
-      setIsLoading(false)
-    }
-  }, [currentUser])
+  
 
   const loadDefectWidgets = useCallback(async () => {
     if (!currentUser) return
@@ -225,18 +201,16 @@ export default function DashboardPage() {
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    void loadMachines()
     void loadDefectWidgets()
     void loadSchedulingData()
 
     const timer = setInterval(() => {
-      void loadMachines()
       void loadDefectWidgets()
       void loadSchedulingData()
     }, 60_000)
 
     return () => clearInterval(timer)
-  }, [loadDefectWidgets, loadMachines, loadSchedulingData])
+  }, [loadDefectWidgets, loadSchedulingData])
 
   if (!authChecked) {
     return (
@@ -429,26 +403,7 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        <div className="mt-5 space-y-4">
-          {isLoading ? (
-            <div className="rounded-[28px] bg-slate-900/90 px-5 py-8 text-center text-slate-300 shadow-xl shadow-black/20">
-              <p className="text-sm">Loading machines...</p>
-            </div>
-          ) : machines.length > 0 ? (
-            machines.map((machine) => (
-              <MachineCard
-                key={machine.id}
-                machine={machine}
-                primaryAction={{ label: 'Start Inspection', href: `/inspection/${machine.id}` }}
-              />
-            ))
-          ) : (
-            <div className="rounded-[28px] bg-slate-900/90 px-5 py-8 text-center text-slate-300 shadow-xl shadow-black/20">
-              <p className="text-sm">No assigned machines are available right now.</p>
-              <p className="mt-2 text-xs text-slate-500">Check back after the next scheduling update.</p>
-            </div>
-          )}
-        </div>
+        
       </div>
 
       <nav className="fixed bottom-0 left-0 right-0 border-t border-slate-800 bg-slate-950/95 px-4 py-3 backdrop-blur-md">
